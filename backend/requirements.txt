@@ -1,0 +1,25 @@
+# API
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic-settings>=2.4
+
+# Orchestration
+langgraph>=0.2
+
+# LangChain components
+langchain-core>=0.3
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+pypdf>=4.3
+
+# Embeddings (Hugging Face, open source, runs locally)
+langchain-huggingface>=0.1
+sentence-transformers>=3.0
+
+# Vector store
+langchain-chroma>=0.1
+chromadb>=0.5
+
+# LLM (official Groq SDK)
+groq>=0.30
