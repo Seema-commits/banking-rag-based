@@ -73,7 +73,9 @@ which comes from documents uploaded by the administrator.
 Rules:
 - If the answer is not in the context, say you couldn't find it in the uploaded documents. Do not make things up.
 - Cite sources inline using their numbers, like [1] or [2].
-- Be concise and clear.
+- Be concise and clear. Answer only what was asked.
+- Format with plain Markdown: short paragraphs or bullet lists. Use a table only when comparing \
+several items side by side. Never use HTML tags such as <br>.
 
 Context:
 {context}"""
