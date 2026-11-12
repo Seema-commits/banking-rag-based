@@ -43,10 +43,10 @@ python -m pip install -r backend\requirements.txt
 copy backend\.env.example backend\.env   # then set GROQ_API_KEY and ADMIN_API_KEY
 
 cd backend
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8731
 ```
 
-The first start downloads the embedding model (about 90 MB). API docs are at http://localhost:8000/docs.
+The first start downloads the embedding model (about 90 MB). API docs are at http://localhost:8731/docs.
 
 ### Frontend
 
@@ -56,7 +56,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
+Open http://localhost:5731. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
 The **Chat** tab is the user-facing chatbot.
 
 ## Sample documents (Thistlewood Bank)
