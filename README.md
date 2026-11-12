@@ -86,6 +86,12 @@ No ports are hard-coded; they are settings with defaults:
 To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and set `PORT` in
 `backend/.env`. CORS allows any `localhost` port, so it needs no change.
 
+## Deployment
+
+The app ships as one container: FastAPI serves the API and the built React app, and indexes
+the Thistlewood sample PDFs at startup. See [docs/deploy-cloud-run.md](docs/deploy-cloud-run.md)
+for a step-by-step Google Cloud Run guide.
+
 ## Sample documents (Thistlewood Bank)
 
 `sample-docs/thistlewood/` contains four short PDFs for a **fictional** bank, Thistlewood Bank:

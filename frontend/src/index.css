@@ -67,6 +67,7 @@ input, textarea {
   border-bottom: 1px solid var(--border);
 }
 .topbar h1 { font-size: 18px; margin: 0; }
+.disclaimer { margin: 0; padding: 6px 16px; font-size: 12px; text-align: center; color: var(--muted); border-bottom: 1px solid var(--border); }
 .topbar nav { display: flex; gap: 4px; }
 .tab { background: none; color: var(--muted); }
 .tab.active { background: var(--bg); color: var(--text); font-weight: 600; }
