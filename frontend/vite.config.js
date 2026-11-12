@@ -1,19 +1,19 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Uncommon ports so this project doesn't clash with others on the same machine.
-// Override the backend address with BACKEND_URL if you run it elsewhere.
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8731";
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5175,
-    // Fail with a clear error if 5175 is taken, instead of silently using another port.
-    strictPort: true,
-    // Forward API calls to FastAPI during development.
-    proxy: {
-      "/api": BACKEND_URL,
+// Ports come from frontend/.env (see .env.example), not from this file.
+//   FRONTEND_PORT  preferred dev-server port; if it's busy, Vite uses the next free one
+//   BACKEND_URL    where the FastAPI backend runs (must match PORT in backend/.env)
+export default defineConfig(({ mode }) => {
+  const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env };
+  return {
+    plugins: [react()],
+    server: {
+      port: Number(env.FRONTEND_PORT) || 5175,
+      // Forward API calls to FastAPI during development.
+      proxy: {
+        "/api": env.BACKEND_URL || "http://localhost:8731",
+      },
     },
-  },
+  };
 });
