@@ -38,9 +38,15 @@ class Settings(BaseSettings):
     relevance_threshold: float = 0.3
     max_history_messages: int = 10
 
+    # Server (used by run.py; Cloud Run and similar hosts set PORT for you)
+    host: str = "127.0.0.1"
+    port: int = 8731
+
     # Security / API
     admin_api_key: str = ""
-    cors_origins: list[str] = ["http://localhost:5731"]
+    # Extra allowed frontend origins, e.g. a deployed site. Any localhost port is always allowed.
+    cors_origins: list[str] = []
+    cors_origin_regex: str = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
 
 
 @lru_cache

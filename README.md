@@ -43,7 +43,7 @@ python -m pip install -r backend\requirements.txt
 copy backend\.env.example backend\.env   # then set GROQ_API_KEY and ADMIN_API_KEY
 
 cd backend
-uvicorn app.main:app --reload --port 8731
+python run.py
 ```
 
 The first start downloads the embedding model (about 90 MB). API docs are at http://localhost:8731/docs.
@@ -56,8 +56,21 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5731. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
-The **Chat** tab is the user-facing chatbot.
+Open the URL Vite prints (http://localhost:5175 by default). The **Admin** tab asks for
+`ADMIN_API_KEY`. Use it to upload and delete PDFs. The **Chat** tab is the user-facing chatbot.
+
+### Ports
+
+No ports are hard-coded; they are settings with defaults:
+
+| Setting | File | Default | Notes |
+|---|---|---|---|
+| `PORT` | `backend/.env` | `8731` | Backend port used by `python run.py` |
+| `FRONTEND_PORT` | `frontend/.env` | `5175` | If busy, Vite uses the next free port and prints it |
+| `BACKEND_URL` | `frontend/.env` | `http://localhost:8731` | Must match the backend `PORT` |
+
+To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and set `PORT` in
+`backend/.env`. CORS allows any `localhost` port, so it needs no change.
 
 ## Sample documents (Thistlewood Bank)
 
