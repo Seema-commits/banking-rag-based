@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "../api.js";
+
+// Raw HTML is never rendered (safer), so turn stray <br> tags from the LLM into plain separators.
+const cleanAnswer = (text) => text.replace(/<br\s*\/?>/gi, " ");
+
+// Wide tables scroll inside the bubble instead of stretching it.
+const markdownComponents = {
+  table: ({ node, ...props }) => (
+    <div className="table-wrap">
+      <table {...props} />
+    </div>
+  ),
+};
 
 export default function Chat() {
   // Each message: { role: "user" | "assistant", content, sources?, error? }
@@ -59,7 +72,9 @@ export default function Chat() {
           <div key={i} className={`msg ${m.role}${m.error ? " error" : ""}`}>
             <div className="bubble">
               {m.role === "assistant" && !m.error ? (
-                <ReactMarkdown>{m.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {cleanAnswer(m.content)}
+                </ReactMarkdown>
               ) : (
                 <p>{m.content}</p>
               )}

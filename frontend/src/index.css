@@ -86,6 +86,12 @@ input, textarea {
 .msg.user .bubble { background: var(--user-bubble); color: #fff; }
 .msg.assistant .bubble { background: var(--assistant-bubble); border: 1px solid var(--border); }
 .msg.error .bubble { color: var(--danger); border-color: var(--danger); }
+.bubble ul, .bubble ol { margin: 0 0 8px; padding-left: 20px; }
+.bubble li { margin: 2px 0; }
+.bubble .table-wrap { margin: 0 0 8px; }
+.bubble table { font-size: 14px; }
+.bubble th, .bubble td { white-space: normal; vertical-align: top; border: 1px solid var(--border); }
+.bubble th { color: inherit; font-weight: 600; }
 .typing { color: var(--muted); font-style: italic; }
 .sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--muted); }
 .source { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
