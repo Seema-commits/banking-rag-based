@@ -136,7 +136,13 @@ that need the RBI document.
 python eval\run_eval.py          # retrieval metrics + threshold sweep, no API key needed
 python eval\run_eval.py --llm    # also generate answers with Groq and check citations
 python eval\run_eval.py --docs sample-docs\thistlewood path\to\rbi-kyc-master-direction.pdf
+python eval\run_eval.py --compare  # before/after table for the retrieval improvements
 ```
+
+`--compare` rebuilds the index for each retrieval variant (baseline, stripped headers/footers,
+500-character chunks, hybrid BM25 + vector search) and prints one comparison table. The
+variants are settings, so the winner can be switched on in `backend/.env` with
+`STRIP_REPEATED_LINES`, `CHUNK_SIZE` / `CHUNK_OVERLAP` and `RETRIEVAL_MODE=hybrid`.
 
 The script builds a temporary index, so it never touches `backend/storage/`. It reports
 retrieval hit rate, top-1 hit rate and out-of-scope refusal rate for thresholds 0.00 to 0.70,

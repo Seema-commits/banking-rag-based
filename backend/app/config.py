@@ -29,10 +29,16 @@ class Settings(BaseSettings):
     registry_path: Path = BASE_DIR / "storage" / "documents.json"
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    # Drop lines that repeat on most pages of a PDF (headers, footers, "Page N") before chunking,
+    # so they don't add noise to every chunk.
+    strip_repeated_lines: bool = False
     max_upload_mb: int = 25
 
     # Retrieval
     top_k: int = 4
+    # "vector" (embeddings only) or "hybrid" (embeddings + BM25 keyword search, merged with
+    # reciprocal rank fusion). Hybrid catches exact terms such as "closure", "Form 60", "CKYC".
+    retrieval_mode: str = "vector"
     # Chunks scoring below this (0 = unrelated, 1 = identical) are dropped, so off-topic
     # questions get the "not found" answer. 0 disables the filter. Tune with the eval set.
     relevance_threshold: float = 0.3

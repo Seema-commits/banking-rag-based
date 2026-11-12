@@ -12,7 +12,7 @@ Masked personal data is reported by type only (for example `"pii_masked": ["AADH
 
 | Event | When | Main fields |
 |---|---|---|
-| `chat` | Every chat request | `outcome`, `latency_ms`, `retrieval_ms`, `rewrite_ms`, `generate_ms`, `llm_ms`, `llm_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `top_score`, `chunks_retrieved`, `chunks_kept`, `sources`, `rewritten`, `history_messages`, `question_chars`, `pii_masked`, `llm_model`, `error_type` |
+| `chat` | Every chat request | `outcome`, `latency_ms`, `retrieval_ms`, `rewrite_ms`, `generate_ms`, `llm_ms`, `llm_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `top_score`, `chunks_kept`, `keyword_only_chunks`, `retrieval_mode`, `sources`, `rewritten`, `history_messages`, `question_chars`, `pii_masked`, `llm_model`, `error_type` |
 | `rate_limited` | A request is blocked by the rate limiter | `scope` (`per_ip_minute` or `daily`) |
 | `startup` | A new container starts | `duration_ms`, `embedding_model`, `llm_model`, `top_k`, `relevance_threshold`, `documents` |
 | `seed` | Sample PDFs indexed at startup | `documents`, `chunks`, `duration_ms` |

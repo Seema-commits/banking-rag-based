@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app import observability as obs
 from app.config import get_settings
-from app.rag.vectorstore import get_vectorstore
+from app.rag.retrieval import search
 
 
 class ChatTurn(TypedDict):
@@ -132,16 +132,16 @@ def group_sources(docs: list[Document]) -> list[SourceGroup]:
 def retrieve(state: RAGState) -> RAGState:
     settings = get_settings()
     with obs.timed("retrieval"):
-        results = get_vectorstore().similarity_search_with_relevance_scores(
-            state["search_query"], k=settings.top_k
-        )
-    # The nearest chunks are returned even for unrelated questions, so drop weak matches.
-    docs = [doc for doc, score in results if score >= settings.relevance_threshold]
+        # Vector or hybrid search; returns nothing when no chunk passes the relevance threshold,
+        # since the nearest chunks are returned even for unrelated questions.
+        hits, best = search(state["search_query"])
+    docs = [h.doc for h in hits]
     sources = group_sources(docs)
     obs.record(
-        chunks_retrieved=len(results),
+        retrieval_mode=settings.retrieval_mode,
         chunks_kept=len(docs),
-        top_score=round(max((s for _, s in results), default=0.0), 3),
+        keyword_only_chunks=sum(h.vector_score is None for h in hits),
+        top_score=round(best, 3),
         sources=len(sources),
     )
     return {"documents": docs, "sources": sources}

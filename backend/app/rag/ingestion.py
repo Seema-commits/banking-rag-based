@@ -1,5 +1,7 @@
 """PDF extraction, chunking and indexing into Chroma."""
 
+import re
+from collections import Counter
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -9,6 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.config import get_settings
 from app.rag import registry
 from app.rag.registry import DocumentRecord
+from app.rag.retrieval import invalidate_keyword_index
 from app.rag.vectorstore import get_vectorstore
 
 # Chroma rejects very large single inserts; stay well under its limit.
@@ -17,6 +20,37 @@ _BATCH_SIZE = 256
 
 class IngestionError(Exception):
     pass
+
+
+def _line_key(line: str) -> str:
+    # "Page 2" and "Page 3" count as the same line.
+    return re.sub(r"\d+", "#", " ".join(line.split()).lower())
+
+
+def strip_repeated_lines(pages: list[Document]) -> int:
+    """Remove lines that appear on at least 60% of the pages (headers, footers, page numbers).
+
+    Edits the pages in place and returns how many lines were removed. Needs 2+ pages.
+    """
+    if len(pages) < 2:
+        return 0
+    counts = Counter()
+    for page in pages:
+        counts.update({_line_key(l) for l in page.page_content.splitlines() if 0 < len(l.strip()) <= 200})
+    min_pages = max(2, -(-len(pages) * 6 // 10))  # ceil(60% of pages)
+    repeated = {key for key, n in counts.items() if n >= min_pages}
+    if not repeated:
+        return 0
+    removed = 0
+    for page in pages:
+        kept = []
+        for line in page.page_content.splitlines():
+            if line.strip() and _line_key(line) in repeated:
+                removed += 1
+            else:
+                kept.append(line)
+        page.page_content = "\n".join(kept)
+    return removed
 
 
 def _chunk_ids(doc_id: str, count: int) -> list[str]:
@@ -35,6 +69,9 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
         raise IngestionError(
             "No extractable text found. The PDF may be scanned images (OCR is not enabled)."
         )
+
+    if settings.strip_repeated_lines:
+        strip_repeated_lines(pages)
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
@@ -74,10 +111,12 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
             )
         registry.add_document(record)
     except Exception:
+        invalidate_keyword_index()
         # Roll back so no chunks are left in the index without a registry entry
         # (they would be searchable but impossible to delete from the Admin page).
         store.delete(ids=ids)
         raise
+    invalidate_keyword_index()
     return record
 
 
@@ -86,3 +125,4 @@ def delete_document(record: DocumentRecord) -> None:
         get_vectorstore().delete(ids=_chunk_ids(record.id, record.chunks))
     (get_settings().upload_dir / f"{record.id}.pdf").unlink(missing_ok=True)
     registry.remove_document(record.id)
+    invalidate_keyword_index()
