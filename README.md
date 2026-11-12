@@ -59,6 +59,39 @@ npm run dev
 Open http://localhost:5173. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
 The **Chat** tab is the user-facing chatbot.
 
+## Sample documents (Thistlewood Bank)
+
+`sample-docs/thistlewood/` contains four short PDFs for a **fictional** bank, Thistlewood Bank:
+account opening and KYC, Video KYC, re-KYC and updating details, and fees and support. The
+Markdown files next to them are the sources; rebuild the PDFs with
+`pip install reportlab` and `python scripts/build_sample_pdfs.py`.
+
+Upload them from the Admin tab to try the chatbot. You can also add the RBI Master Direction
+on KYC (download it from rbi.org.in, and keep `rbi` in the filename so the eval finds it).
+
+> Thistlewood Bank is fictional. This is a portfolio demo, not affiliated with any bank or
+> the Reserve Bank of India, and not financial advice.
+
+## Evaluation
+
+`eval/questions.jsonl` has 37 questions answered by the sample documents (each tagged with the
+file and page that holds the answer), 9 questions the bot should refuse (including tricky ones
+such as "What is the home loan interest rate at Thistlewood Bank?"), and 4 optional questions
+that need the RBI document.
+
+```powershell
+# from the project root, with the backend virtualenv active
+python eval\run_eval.py          # retrieval metrics + threshold sweep, no API key needed
+python eval\run_eval.py --llm    # also generate answers with Groq and check citations
+python eval\run_eval.py --docs sample-docs\thistlewood path\to\rbi-kyc-master-direction.pdf
+```
+
+The script builds a temporary index, so it never touches `backend/storage/`. It reports
+retrieval hit rate, top-1 hit rate and out-of-scope refusal rate for thresholds 0.00 to 0.70,
+suggests a `RELEVANCE_THRESHOLD`, and lists every miss. With `--llm` it also checks that
+citations point at returned sources and at the expected page. Full results are written to
+`eval/results/latest.json`.
+
 ## API
 
 | Method | Path | Auth | Purpose |

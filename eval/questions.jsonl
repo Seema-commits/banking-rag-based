@@ -1,0 +1,50 @@
+{"id": "kyc-01", "type": "in_scope", "question": "What documents do I need to open a savings account?", "sources": [["account-opening-and-kyc-guide", 1]], "answer_keywords": ["OVD", "Officially Valid Document", "PAN"]}
+{"id": "kyc-02", "type": "in_scope", "question": "Which documents are accepted as officially valid documents?", "sources": [["account-opening-and-kyc-guide", 1]], "answer_keywords": ["passport", "driving licence", "voter"]}
+{"id": "kyc-03", "type": "in_scope", "question": "I don't have a PAN card. Can I still open an account?", "sources": [["account-opening-and-kyc-guide", 1]], "answer_keywords": ["Form 60"]}
+{"id": "kyc-04", "type": "in_scope", "question": "My ID shows my old address. What should I submit as address proof?", "sources": [["account-opening-and-kyc-guide", 1]], "answer_keywords": ["utility bill", "three months", "3 months"]}
+{"id": "kyc-05", "type": "in_scope", "question": "Is it mandatory to give my Aadhaar for KYC?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["voluntary", "not mandatory", "any other"]}
+{"id": "kyc-06", "type": "in_scope", "question": "What is a CKYC number and how does it help me?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["KIN", "Central KYC", "CKYCR"]}
+{"id": "kyc-07", "type": "in_scope", "question": "I have no identity documents at all. Can I still open an account?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["small account"]}
+{"id": "kyc-08", "type": "in_scope", "question": "What is the maximum balance allowed in a small account?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["50,000"]}
+{"id": "kyc-09", "type": "in_scope", "question": "How can my 8 year old daughter get a bank account?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["guardian", "parent"]}
+{"id": "kyc-10", "type": "in_scope", "question": "What documents does an NRI need to open an account?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["visa", "passport", "overseas"]}
+{"id": "kyc-11", "type": "in_scope", "question": "How long does it take to activate my account after I visit the branch?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["1 working day", "one working day"]}
+{"id": "vkyc-01", "type": "in_scope", "question": "What is Video KYC?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["video call", "V-CIP"]}
+{"id": "vkyc-02", "type": "in_scope", "question": "Can I complete video KYC while I am travelling abroad?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["India", "outside India"]}
+{"id": "vkyc-03", "type": "in_scope", "question": "What should I keep ready before the video KYC call?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["original PAN", "white paper", "pen"]}
+{"id": "vkyc-04", "type": "in_scope", "question": "Can an NRI or a minor use Video KYC?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["cannot", "branch"]}
+{"id": "vkyc-05", "type": "in_scope", "question": "Can I do my video KYC on a Sunday?", "sources": [["video-kyc-guide", 2]], "answer_keywords": ["Monday to Saturday", "not available on Sunday", "no"]}
+{"id": "vkyc-06", "type": "in_scope", "question": "What are the steps to complete Video KYC?", "sources": [["video-kyc-guide", 2]], "answer_keywords": ["Start Video KYC", "officer", "PAN"]}
+{"id": "vkyc-07", "type": "in_scope", "question": "How long does the video KYC call take?", "sources": [["video-kyc-guide", 2]], "answer_keywords": ["5 to 7 minutes", "5-7 minutes"]}
+{"id": "vkyc-08", "type": "in_scope", "question": "Why would my Video KYC get rejected?", "sources": [["video-kyc-guide", 3]], "answer_keywords": ["photocopy", "outside India", "face"]}
+{"id": "vkyc-09", "type": "in_scope", "question": "My video KYC call got disconnected in the middle. What do I do now?", "sources": [["video-kyc-guide", 3]], "answer_keywords": ["72 hours"]}
+{"id": "vkyc-10", "type": "in_scope", "question": "Will the bank officer ask for my OTP during the video call?", "sources": [["video-kyc-guide", 3]], "answer_keywords": ["never", "not"]}
+{"id": "rekyc-01", "type": "in_scope", "question": "How often do I need to update my KYC?", "sources": [["rekyc-and-updating-details", 1]], "answer_keywords": ["2 years", "8 years", "10 years"]}
+{"id": "rekyc-02", "type": "in_scope", "question": "What does re-KYC mean?", "sources": [["rekyc-and-updating-details", 1]], "answer_keywords": ["periodic updation", "refresh", "confirm"]}
+{"id": "rekyc-03", "type": "in_scope", "question": "My details have not changed. How do I complete re-KYC?", "sources": [["rekyc-and-updating-details", 2]], "answer_keywords": ["self-declaration"]}
+{"id": "rekyc-04", "type": "in_scope", "question": "I moved to a new house. How do I update my address for KYC?", "sources": [["rekyc-and-updating-details", 2]], "answer_keywords": ["self-declaration", "two months", "2 months"]}
+{"id": "rekyc-05", "type": "in_scope", "question": "What happens if I miss my re-KYC due date?", "sources": [["rekyc-and-updating-details", 3]], "answer_keywords": ["partial freeze", "freeze"]}
+{"id": "rekyc-06", "type": "in_scope", "question": "How do I change my registered mobile number?", "sources": [["rekyc-and-updating-details", 3]], "answer_keywords": ["branch", "OTP"]}
+{"id": "rekyc-07", "type": "in_scope", "question": "How do I change my name on the account after marriage?", "sources": [["rekyc-and-updating-details", 3]], "answer_keywords": ["marriage certificate"]}
+{"id": "fees-01", "type": "in_scope", "question": "What is the minimum balance for a savings account?", "sources": [["fees-charges-and-support-faq", 1]], "answer_keywords": ["5,000", "2,000"]}
+{"id": "fees-02", "type": "in_scope", "question": "What is the penalty for not maintaining the minimum balance?", "sources": [["fees-charges-and-support-faq", 1]], "answer_keywords": ["5%", "250"]}
+{"id": "fees-03", "type": "in_scope", "question": "How many free ATM withdrawals do I get each month?", "sources": [["fees-charges-and-support-faq", 1]], "answer_keywords": ["5 free", "3 free", "five"]}
+{"id": "fees-04", "type": "in_scope", "question": "Are NEFT and IMPS transfers free?", "sources": [["fees-charges-and-support-faq", 2]], "answer_keywords": ["free"]}
+{"id": "fees-05", "type": "in_scope", "question": "Is there a charge for closing my account?", "sources": [["fees-charges-and-support-faq", 2]], "answer_keywords": ["500", "14 days"]}
+{"id": "fees-06", "type": "in_scope", "question": "What interest rate will I earn on my savings account?", "sources": [["fees-charges-and-support-faq", 2]], "answer_keywords": ["2.75%", "3.25%"]}
+{"id": "fees-07", "type": "in_scope", "question": "I lost my debit card. How do I block it?", "sources": [["fees-charges-and-support-faq", 3]], "answer_keywords": ["app", "1800-000-0000"]}
+{"id": "fees-08", "type": "in_scope", "question": "How do I file a complaint if the bank does not resolve my issue?", "sources": [["fees-charges-and-support-faq", 3]], "answer_keywords": ["Nodal Officer", "Ombudsman"]}
+{"id": "fees-09", "type": "in_scope", "question": "What is the customer care phone number?", "sources": [["fees-charges-and-support-faq", 3], ["account-opening-and-kyc-guide", 3], ["video-kyc-guide", 3]], "answer_keywords": ["1800-000-0000"]}
+{"id": "oos-01", "type": "out_of_scope", "question": "What's the weather in Mumbai today?"}
+{"id": "oos-02", "type": "out_of_scope", "question": "Who won the cricket world cup in 2011?"}
+{"id": "oos-03", "type": "out_of_scope", "question": "Write a Python function to sort a list."}
+{"id": "oos-04", "type": "out_of_scope", "question": "Tell me a joke."}
+{"id": "oos-05", "type": "out_of_scope", "question": "What is my current account balance?", "note": "needs account access, not documents"}
+{"id": "oos-06", "type": "out_of_scope", "question": "Should I invest in mutual funds or fixed deposits?", "note": "financial advice"}
+{"id": "oos-07", "type": "out_of_scope", "question": "What is the current share price of Thistlewood Bank?", "note": "hard negative: mentions the bank"}
+{"id": "oos-08", "type": "out_of_scope", "question": "What is the home loan interest rate at Thistlewood Bank?", "note": "hard negative: banking topic not in the documents"}
+{"id": "oos-09", "type": "out_of_scope", "question": "How do I apply for a Thistlewood credit card?", "note": "hard negative: banking topic not in the documents"}
+{"id": "rbi-01", "type": "in_scope", "requires": "rbi", "question": "According to the RBI, what is an Officially Valid Document?", "sources": [["rbi", null]], "chunk_keywords": ["Officially Valid Document"]}
+{"id": "rbi-02", "type": "in_scope", "requires": "rbi", "question": "What does the RBI say about the Video based Customer Identification Process (V-CIP)?", "sources": [["rbi", null]], "chunk_keywords": ["V-CIP", "Video based Customer Identification"]}
+{"id": "rbi-03", "type": "in_scope", "requires": "rbi", "question": "What are the RBI rules for periodic updation of KYC?", "sources": [["rbi", null]], "chunk_keywords": ["periodic updation"]}
+{"id": "rbi-04", "type": "in_scope", "requires": "rbi", "question": "What is the Central KYC Records Registry according to RBI rules?", "sources": [["rbi", null]], "chunk_keywords": ["Central KYC Records Registry", "CKYCR"]}
