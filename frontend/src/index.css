@@ -67,6 +67,7 @@ input, textarea {
   border-bottom: 1px solid var(--border);
 }
 .topbar h1 { font-size: 18px; margin: 0; }
+.disclaimer { margin: 0; padding: 6px 16px; font-size: 12px; text-align: center; color: var(--muted); border-bottom: 1px solid var(--border); }
 .topbar nav { display: flex; gap: 4px; }
 .tab { background: none; color: var(--muted); }
 .tab.active { background: var(--bg); color: var(--text); font-weight: 600; }
@@ -86,6 +87,7 @@ input, textarea {
 .msg.user .bubble { background: var(--user-bubble); color: #fff; }
 .msg.assistant .bubble { background: var(--assistant-bubble); border: 1px solid var(--border); }
 .msg.error .bubble { color: var(--danger); border-color: var(--danger); }
+.bubble .notice { margin: 8px 0 0; padding: 6px 10px; border-radius: 8px; font-size: 13px; background: var(--notice-bg, rgba(234, 179, 8, 0.12)); }
 .bubble ul, .bubble ol { margin: 0 0 8px; padding-left: 20px; }
 .bubble li { margin: 2px 0; }
 .bubble .table-wrap { margin: 0 0 8px; }

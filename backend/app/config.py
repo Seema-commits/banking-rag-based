@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     # Server (used by run.py; Cloud Run and similar hosts set PORT for you)
     host: str = "127.0.0.1"
     port: int = 8731
+    reload: bool = True  # auto-restart on code changes; the Docker image sets RELOAD=false
+
+    # Built React app served by FastAPI at "/" when present (production/Docker).
+    # In development the Vite dev server serves the frontend instead.
+    static_dir: Path = BASE_DIR.parent / "frontend" / "dist"
+    # PDFs indexed automatically at startup when the knowledge base is empty
+    # (the Docker image points this at sample-docs/thistlewood). Empty = off.
+    seed_docs_dir: Path | None = None
+
+    # Abuse protection for the public chat endpoint (0 disables a limit).
+    chat_requests_per_minute_per_ip: int = 10
+    chat_requests_per_day: int = 500  # across all users, protects the Groq quota
 
     # Security / API
     admin_api_key: str = ""

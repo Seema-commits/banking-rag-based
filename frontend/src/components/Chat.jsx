@@ -43,7 +43,7 @@ export default function Chat() {
       const res = await api.chat(question, history);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: res.answer, sources: res.sources },
+        { role: "assistant", content: res.answer, sources: res.sources, notice: res.notice },
       ]);
     } catch (err) {
       setMessages((prev) => [
@@ -78,6 +78,7 @@ export default function Chat() {
               ) : (
                 <p>{m.content}</p>
               )}
+              {m.notice && <p className="notice">{m.notice}</p>}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   <span>Sources:</span>
