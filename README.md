@@ -59,6 +59,20 @@ npm run dev
 Open the URL Vite prints (http://localhost:5175 by default). The **Admin** tab asks for
 `ADMIN_API_KEY`. Use it to upload and delete PDFs. The **Chat** tab is the user-facing chatbot.
 
+### Start both with one command (Windows)
+
+After the one-time setup above, start everything with:
+
+```powershell
+.\start-dev.ps1
+```
+
+or double-click `start-dev.cmd`. It opens two windows, "ragbased backend" and
+"ragbased frontend", waits for the backend to be ready, then starts the frontend (running
+`npm install` on the first run). Press Ctrl+C or close a window to stop that server. If
+PowerShell refuses to run scripts, use `start-dev.cmd`, or run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
 ### Ports
 
 No ports are hard-coded; they are settings with defaults:
