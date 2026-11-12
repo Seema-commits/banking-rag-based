@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     # Retrieval
     top_k: int = 4
+    # Chunks scoring below this (0 = unrelated, 1 = identical) are dropped, so off-topic
+    # questions get the "not found" answer. 0 disables the filter. Tune with the eval set.
+    relevance_threshold: float = 0.3
     max_history_messages: int = 10
 
     # Security / API

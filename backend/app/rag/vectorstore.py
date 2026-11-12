@@ -27,4 +27,7 @@ def get_vectorstore() -> Chroma:
         embedding_function=get_embeddings(),
         persist_directory=str(settings.chroma_dir),
         collection_metadata={"hnsw:space": "cosine"},
+        # Cosine distance (0 = identical) -> relevance score (1 = identical, 0 = unrelated).
+        # Set explicitly so scores don't depend on how the Chroma version reports its metric.
+        relevance_score_fn=lambda distance: max(0.0, 1.0 - distance),
     )

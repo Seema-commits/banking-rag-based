@@ -16,11 +16,21 @@ class ChatTurn(TypedDict):
     content: str
 
 
+class SourceGroup(TypedDict):
+    """All retrieved chunks from one (document, page). Its position in the list is its citation number."""
+
+    doc_id: str
+    filename: str
+    page: int
+    chunks: list[str]
+
+
 class RAGState(TypedDict, total=False):
     question: str
     history: list[ChatTurn]
     search_query: str
     documents: list[Document]
+    sources: list[SourceGroup]
     answer: str
 
 
@@ -87,28 +97,48 @@ def contextualize(state: RAGState) -> RAGState:
     return {"search_query": rewritten or state["question"]}
 
 
+def group_sources(docs: list[Document]) -> list[SourceGroup]:
+    """Merge chunks from the same (document, page), keeping retrieval order.
+
+    The same numbering is shown to the LLM and returned to the UI, so a citation
+    like [2] in the answer always points at the second source in the list.
+    """
+    groups: dict[tuple[str, int], SourceGroup] = {}
+    for d in docs:
+        m = d.metadata
+        key = (m.get("doc_id", ""), int(m.get("page", 0)))
+        group = groups.setdefault(
+            key,
+            SourceGroup(doc_id=key[0], filename=m.get("filename", "unknown"), page=key[1], chunks=[]),
+        )
+        group["chunks"].append(d.page_content)
+    return list(groups.values())
+
+
 def retrieve(state: RAGState) -> RAGState:
-    docs = get_vectorstore().similarity_search(
-        state["search_query"], k=get_settings().top_k
+    settings = get_settings()
+    results = get_vectorstore().similarity_search_with_relevance_scores(
+        state["search_query"], k=settings.top_k
     )
-    return {"documents": docs}
+    # The nearest chunks are returned even for unrelated questions, so drop weak matches.
+    docs = [doc for doc, score in results if score >= settings.relevance_threshold]
+    return {"documents": docs, "sources": group_sources(docs)}
 
 
 def route_after_retrieve(state: RAGState) -> Literal["generate", "no_context"]:
-    return "generate" if state.get("documents") else "no_context"
+    return "generate" if state.get("sources") else "no_context"
 
 
-def _format_context(docs: list[Document]) -> str:
+def _format_context(sources: list[SourceGroup]) -> str:
     return "\n\n".join(
-        f"[{i}] (source: {d.metadata.get('filename')}, page {d.metadata.get('page')})\n"
-        f"{d.page_content}"
-        for i, d in enumerate(docs, start=1)
+        f"[{i}] (source: {s['filename']}, page {s['page']})\n" + "\n...\n".join(s["chunks"])
+        for i, s in enumerate(sources, start=1)
     )
 
 
 def generate(state: RAGState) -> RAGState:
     messages = [
-        {"role": "system", "content": ANSWER_PROMPT.format(context=_format_context(state["documents"]))},
+        {"role": "system", "content": ANSWER_PROMPT.format(context=_format_context(state["sources"]))},
         *_history_messages(state.get("history") or []),
         {"role": "user", "content": state["question"]},
     ]
