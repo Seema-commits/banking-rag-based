@@ -6,6 +6,10 @@ Usage (from the project root, with the backend virtualenv active):
     python eval/run_eval.py                       # retrieval + threshold sweep, no API key needed
     python eval/run_eval.py --llm                 # also run the full pipeline (needs GROQ_API_KEY)
     python eval/run_eval.py --docs sample-docs/thistlewood path/to/RBI-KYC-Master-Direction.pdf
+    python eval/run_eval.py --compare             # before/after table for the retrieval variants
+
+Retrieval uses the app's own search (backend/app/rag/retrieval.py), so the results reflect
+CHUNK_SIZE, STRIP_REPEATED_LINES and RETRIEVAL_MODE from backend/.env unless --compare is used.
 
 Metrics:
     hit@k         in-scope questions where a chunk from the expected file/page passes the threshold
@@ -33,6 +37,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 THRESHOLDS = [round(0.05 * i, 2) for i in range(0, 15)]  # 0.00 .. 0.70
 
+# Each step adds one improvement, so the table shows what each change contributes.
+COMPARE_CONFIGS = [
+    ("baseline (1000 chars, vector)", dict(chunk_size=1000, chunk_overlap=200,
+                                           strip_repeated_lines=False, retrieval_mode="vector")),
+    ("+ strip headers/footers", dict(chunk_size=1000, chunk_overlap=200,
+                                     strip_repeated_lines=True, retrieval_mode="vector")),
+    ("+ 500-char chunks", dict(chunk_size=500, chunk_overlap=100,
+                               strip_repeated_lines=True, retrieval_mode="vector")),
+    ("+ hybrid BM25 (500 chars)", dict(chunk_size=500, chunk_overlap=100,
+                                       strip_repeated_lines=True, retrieval_mode="hybrid")),
+    ("hybrid BM25 (1000 chars)", dict(chunk_size=1000, chunk_overlap=200,
+                                      strip_repeated_lines=True, retrieval_mode="hybrid")),
+]
+
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -42,6 +60,8 @@ def parse_args():
     p.add_argument("--threshold", type=float, help="threshold for --llm and the detail report "
                    "(default: RELEVANCE_THRESHOLD from backend/.env)")
     p.add_argument("--llm", action="store_true", help="also generate answers with the full LangGraph pipeline")
+    p.add_argument("--compare", action="store_true",
+                   help="evaluate each retrieval variant in COMPARE_CONFIGS and print a comparison table")
     p.add_argument("--out", default=str(ROOT / "eval" / "results" / "latest.json"))
     return p.parse_args()
 
@@ -73,12 +93,24 @@ def matches(meta_file: str, meta_page: int, text: str, q: dict) -> bool:
     return False
 
 
+def kept_chunks(row, t):
+    """Chunks the app would use at threshold t (same rule as app.rag.retrieval.search)."""
+    if row["best"] < t:
+        return []
+    if row["mode"] == "hybrid":
+        return row["chunks"]
+    return [c for c in row["chunks"] if c["score"] is not None and c["score"] >= t]
+
+
 def retrieval_metrics(rows, t):
     ins = [r for r in rows if r["type"] == "in_scope"]
     oos = [r for r in rows if r["type"] == "out_of_scope"]
-    hit = sum(any(c["match"] and c["score"] >= t for c in r["chunks"]) for r in ins)
-    top1 = sum(bool(r["chunks"]) and r["chunks"][0]["score"] >= t and r["chunks"][0]["match"] for r in ins)
-    refused = sum(all(c["score"] < t for c in r["chunks"]) for r in oos)
+    hit = top1 = 0
+    for r in ins:
+        kept = kept_chunks(r, t)
+        hit += any(c["match"] for c in kept)
+        top1 += bool(kept) and kept[0]["match"]
+    refused = sum(not kept_chunks(r, t) for r in oos)
     m = {
         "threshold": t,
         "hit_at_k": hit / len(ins) if ins else 0.0,
@@ -89,8 +121,95 @@ def retrieval_metrics(rows, t):
     return m
 
 
+def best_of(sweep):
+    return max(sweep, key=lambda m: (round(m["balanced"], 4), m["hit_at_k"]))
+
+
 def pct(x):
     return f"{x * 100:5.1f}%"
+
+
+def build_index(settings, pdfs, tmp: Path, overrides: dict | None = None, quiet=False) -> int:
+    """(Re)build a throwaway index with the given setting overrides; returns the chunk count."""
+    from app.rag.ingestion import ingest_pdf
+    from app.rag.retrieval import invalidate_keyword_index
+    from app.rag.vectorstore import get_vectorstore
+
+    for key, value in (overrides or {}).items():
+        setattr(settings, key, value)
+    run = tmp / uuid.uuid4().hex[:8]
+    settings.chroma_dir, settings.upload_dir = run / "chroma", run / "uploads"
+    settings.registry_path = run / "documents.json"
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    get_vectorstore.cache_clear()  # new Chroma folder; the embedding model stays loaded
+    invalidate_keyword_index()
+
+    total = 0
+    for pdf in pdfs:
+        doc_id = uuid.uuid4().hex
+        dest = settings.upload_dir / f"{doc_id}.pdf"
+        shutil.copy(pdf, dest)
+        rec = ingest_pdf(dest, doc_id, pdf.name)
+        total += rec.chunks
+        if not quiet:
+            print(f"  {pdf.name}: {rec.pages} pages, {rec.chunks} chunks")
+    return total
+
+
+def collect_rows(settings, questions):
+    """Search every question with the threshold disabled, so any threshold can be scored later."""
+    from app.rag.retrieval import search
+
+    saved, settings.relevance_threshold = settings.relevance_threshold, 0.0
+    try:
+        rows = []
+        for q in questions:
+            hits, best = search(q["question"])
+            chunks = [
+                {"file": h.doc.metadata.get("filename"), "page": h.doc.metadata.get("page"),
+                 "score": None if h.vector_score is None else round(h.vector_score, 4),
+                 "match": matches(h.doc.metadata.get("filename", ""), h.doc.metadata.get("page"),
+                                  h.doc.page_content, q)}
+                for h in hits
+            ]
+            rows.append({**q, "mode": settings.retrieval_mode, "best": round(best, 4), "chunks": chunks})
+        return rows
+    finally:
+        settings.relevance_threshold = saved
+
+
+def load_questions(path, pdfs):
+    indexed = " ".join(p.name.lower() for p in pdfs)
+    questions = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    skipped = [q["id"] for q in questions if q.get("requires") and q["requires"] not in indexed]
+    return [q for q in questions if q["id"] not in skipped], skipped
+
+
+def run_compare(args, settings, pdfs, tmp):
+    questions, skipped = load_questions(args.questions, pdfs)
+    print(f"Comparing {len(COMPARE_CONFIGS)} retrieval variants on {len(questions)} questions "
+          f"(top_k={settings.top_k}, embeddings={settings.embedding_model})\n")
+    results = []
+    for name, overrides in COMPARE_CONFIGS:
+        chunks = build_index(settings, pdfs, tmp, overrides, quiet=True)
+        rows = collect_rows(settings, questions)
+        sweep = [retrieval_metrics(rows, t) for t in THRESHOLDS]
+        results.append({"name": name, "settings": overrides, "chunks": chunks,
+                        "no_threshold": sweep[0], "best": best_of(sweep), "sweep": sweep})
+        print(f"  done: {name}")
+
+    print("\n| Variant | Chunks | Hit@k (no threshold) | Top-1 (no threshold) | Best threshold "
+          "| Hit@k | Top-1 | Refusal | Balanced |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for r in results:
+        n, b = r["no_threshold"], r["best"]
+        print(f"| {r['name']} | {r['chunks']} | {pct(n['hit_at_k'])} | {pct(n['top1_hit'])} | "
+              f"{b['threshold']:.2f} | {pct(b['hit_at_k'])} | {pct(b['top1_hit'])} | {pct(b['refusal'])} | "
+              f"{pct(b['balanced'])} |")
+    print("\nHit@k: right page among the chunks sent to the LLM. Top-1: right page ranked first."
+          "\nRefusal: off-topic questions answered with 'not found'. Balanced: average of Hit@k and Refusal.")
+    return {"mode": "compare", "top_k": settings.top_k, "model": settings.embedding_model,
+            "skipped": skipped, "variants": results}
 
 
 def main():
@@ -98,72 +217,14 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="rag-eval-"))
     try:
         settings = setup_app(tmp)
-        from app.rag.ingestion import ingest_pdf
-        from app.rag.vectorstore import get_vectorstore
-
         pdfs = collect_pdfs(args.docs)
         if not pdfs:
             sys.exit("No PDFs found to index.")
-        settings.upload_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Indexing {len(pdfs)} PDF(s) with {settings.embedding_model} ...")
-        for pdf in pdfs:
-            doc_id = uuid.uuid4().hex
-            dest = settings.upload_dir / f"{doc_id}.pdf"
-            shutil.copy(pdf, dest)
-            rec = ingest_pdf(dest, doc_id, pdf.name)
-            print(f"  {pdf.name}: {rec.pages} pages, {rec.chunks} chunks")
-        indexed = " ".join(p.name.lower() for p in pdfs)
 
-        questions = [json.loads(l) for l in Path(args.questions).read_text(encoding="utf-8").splitlines() if l.strip()]
-        skipped = [q["id"] for q in questions if q.get("requires") and q["requires"] not in indexed]
-        questions = [q for q in questions if q["id"] not in skipped]
-
-        store = get_vectorstore()
-        rows = []
-        for q in questions:
-            results = store.similarity_search_with_relevance_scores(q["question"], k=settings.top_k)
-            chunks = [
-                {"file": d.metadata.get("filename"), "page": d.metadata.get("page"), "score": round(s, 4),
-                 "match": matches(d.metadata.get("filename", ""), d.metadata.get("page"), d.page_content, q)}
-                for d, s in results
-            ]
-            rows.append({**q, "chunks": chunks})
-
-        sweep = [retrieval_metrics(rows, t) for t in THRESHOLDS]
-        best = max(sweep, key=lambda m: (round(m["balanced"], 4), m["hit_at_k"]))
-        current = args.threshold if args.threshold is not None else settings.relevance_threshold
-
-        n_in = sum(r["type"] == "in_scope" for r in rows)
-        n_oos = len(rows) - n_in
-        print(f"\nQuestions: {n_in} in-scope, {n_oos} out-of-scope, top_k={settings.top_k}"
-              + (f", skipped {len(skipped)} needing missing docs: {', '.join(skipped)}" if skipped else ""))
-        print("\nThreshold sweep (retrieval only)")
-        print("threshold | hit@k  | top-1  | refusal | balanced")
-        for m in sweep:
-            mark = "  <- best" if m is best else ("  <- current" if abs(m["threshold"] - current) < 1e-9 else "")
-            print(f"  {m['threshold']:.2f}    | {pct(m['hit_at_k'])} | {pct(m['top1_hit'])} | {pct(m['refusal'])}  | "
-                  f"{pct(m['balanced'])}{mark}")
-        print(f"\nSuggested RELEVANCE_THRESHOLD={best['threshold']:.2f} (current {current:.2f})")
-
-        cur = retrieval_metrics(rows, current)
-        misses = [r for r in rows if r["type"] == "in_scope"
-                  and not any(c["match"] and c["score"] >= current for c in r["chunks"])]
-        leaks = [r for r in rows if r["type"] == "out_of_scope" and any(c["score"] >= current for c in r["chunks"])]
-        if misses or leaks:
-            print(f"\nFailures at threshold {current:.2f}:")
-            for r in misses:
-                top = r["chunks"][0] if r["chunks"] else None
-                got = f"{top['file']} p.{top['page']} ({top['score']:.2f})" if top else "nothing"
-                print(f"  MISS    {r['id']}: {r['question']}  -> top: {got}")
-            for r in leaks:
-                print(f"  ANSWERS {r['id']}: {r['question']}  -> top score {r['chunks'][0]['score']:.2f}")
-
-        report = {"model": settings.embedding_model, "top_k": settings.top_k, "threshold": current,
-                  "retrieval": cur, "sweep": sweep, "suggested_threshold": best["threshold"],
-                  "skipped": skipped, "questions": rows}
-
-        if args.llm:
-            report["answers"] = run_llm(rows, current, settings)
+        if args.compare:
+            report = run_compare(args, settings, pdfs, tmp)
+        else:
+            report = run_single(args, settings, pdfs, tmp)
 
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -171,6 +232,50 @@ def main():
         print(f"\nDetails written to {out.relative_to(ROOT) if out.is_relative_to(ROOT) else out}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_single(args, settings, pdfs, tmp):
+    print(f"Indexing {len(pdfs)} PDF(s) with {settings.embedding_model} "
+          f"(chunk_size={settings.chunk_size}, strip_repeated_lines={settings.strip_repeated_lines}, "
+          f"retrieval_mode={settings.retrieval_mode}) ...")
+    build_index(settings, pdfs, tmp)
+    questions, skipped = load_questions(args.questions, pdfs)
+    rows = collect_rows(settings, questions)
+
+    sweep = [retrieval_metrics(rows, t) for t in THRESHOLDS]
+    best = best_of(sweep)
+    current = args.threshold if args.threshold is not None else settings.relevance_threshold
+
+    n_in = sum(r["type"] == "in_scope" for r in rows)
+    print(f"\nQuestions: {n_in} in-scope, {len(rows) - n_in} out-of-scope, top_k={settings.top_k}"
+          + (f", skipped {len(skipped)} needing missing docs: {', '.join(skipped)}" if skipped else ""))
+    print("\nThreshold sweep (retrieval only)")
+    print("threshold | hit@k  | top-1  | refusal | balanced")
+    for m in sweep:
+        mark = "  <- best" if m is best else ("  <- current" if abs(m["threshold"] - current) < 1e-9 else "")
+        print(f"  {m['threshold']:.2f}    | {pct(m['hit_at_k'])} | {pct(m['top1_hit'])} | {pct(m['refusal'])}  | "
+              f"{pct(m['balanced'])}{mark}")
+    print(f"\nSuggested RELEVANCE_THRESHOLD={best['threshold']:.2f} (current {current:.2f})")
+
+    cur = retrieval_metrics(rows, current)
+    misses = [r for r in rows if r["type"] == "in_scope" and not any(c["match"] for c in kept_chunks(r, current))]
+    leaks = [r for r in rows if r["type"] == "out_of_scope" and kept_chunks(r, current)]
+    if misses or leaks:
+        print(f"\nFailures at threshold {current:.2f}:")
+        for r in misses:
+            top = r["chunks"][0] if r["chunks"] else None
+            got = f"{top['file']} p.{top['page']}" if top else "nothing"
+            print(f"  MISS    {r['id']}: {r['question']}  -> top: {got} (best score {r['best']:.2f})")
+        for r in leaks:
+            print(f"  ANSWERS {r['id']}: {r['question']}  -> best score {r['best']:.2f}")
+
+    report = {"model": settings.embedding_model, "top_k": settings.top_k, "threshold": current,
+              "chunk_size": settings.chunk_size, "strip_repeated_lines": settings.strip_repeated_lines,
+              "retrieval_mode": settings.retrieval_mode, "retrieval": cur, "sweep": sweep,
+              "suggested_threshold": best["threshold"], "skipped": skipped, "questions": rows}
+    if args.llm:
+        report["answers"] = run_llm(rows, current, settings)
+    return report
 
 
 def run_llm(rows, threshold, settings):

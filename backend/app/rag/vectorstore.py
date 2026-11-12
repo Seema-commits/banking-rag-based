@@ -1,14 +1,16 @@
 from functools import lru_cache
 
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from app.config import get_settings
 
 
 @lru_cache
-def get_embeddings() -> HuggingFaceEmbeddings:
+def get_embeddings():
     """Load the Hugging Face sentence-transformers model once per process."""
+    # Imported here so modules (and unit tests) can import this file without loading PyTorch.
+    from langchain_huggingface import HuggingFaceEmbeddings
+
     settings = get_settings()
     return HuggingFaceEmbeddings(
         model_name=settings.embedding_model,
