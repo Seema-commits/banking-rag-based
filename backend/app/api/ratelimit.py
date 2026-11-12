@@ -4,6 +4,7 @@ Good enough for a single-instance demo (the Cloud Run guide sets max instances t
 With several instances each one keeps its own counters.
 """
 
+import logging
 import threading
 import time
 from collections import defaultdict, deque
@@ -12,6 +13,9 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request, status
 
 from app.config import get_settings
+from app.observability import log_event
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _per_ip: dict[str, deque[float]] = defaultdict(deque)
@@ -39,6 +43,7 @@ def limit_chat(request: Request) -> None:
             while hits and now - hits[0] > 60:
                 hits.popleft()
             if len(hits) >= per_minute:
+                log_event(logger, "rate_limited", level=logging.WARNING, scope="per_ip_minute")
                 raise HTTPException(
                     status.HTTP_429_TOO_MANY_REQUESTS,
                     "You're sending messages too quickly. Please wait a minute and try again.",
@@ -48,6 +53,7 @@ def limit_chat(request: Request) -> None:
         if _day["date"] != today:
             _day["date"], _day["count"] = today, 0
         if per_day > 0 and _day["count"] >= per_day:
+            log_event(logger, "rate_limited", level=logging.WARNING, scope="daily")
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
                 "This demo has reached its daily question limit. Please try again tomorrow.",

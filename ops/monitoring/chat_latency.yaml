@@ -1,0 +1,12 @@
+description: End-to-end chat latency in milliseconds
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="thistlewood-assistant" AND jsonPayload.event="chat"'
+valueExtractor: EXTRACT(jsonPayload.latency_ms)
+metricDescriptor:
+  metricKind: DELTA
+  valueType: DISTRIBUTION
+  unit: ms
+bucketOptions:
+  exponentialBuckets:
+    numFiniteBuckets: 24
+    growthFactor: 1.5
+    scale: 20

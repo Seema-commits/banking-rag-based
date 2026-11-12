@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8731
     reload: bool = True  # auto-restart on code changes; the Docker image sets RELOAD=false
+    # "text" for readable local logs, "json" for structured logs (Cloud Logging); Docker uses json.
+    log_format: str = "text"
 
     # Built React app served by FastAPI at "/" when present (production/Docker).
     # In development the Vite dev server serves the frontend instead.

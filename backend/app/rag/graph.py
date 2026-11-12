@@ -7,6 +7,7 @@ from groq import Groq
 from langchain_core.documents import Document
 from langgraph.graph import END, START, StateGraph
 
+from app import observability as obs
 from app.config import get_settings
 from app.rag.vectorstore import get_vectorstore
 
@@ -49,11 +50,17 @@ def get_client() -> Groq:
 def complete(messages: list[dict]) -> str:
     """One Groq chat completion; returns the assistant's text."""
     settings = get_settings()
-    chat_completion = get_client().chat.completions.create(
-        messages=messages,
-        model=settings.groq_model,
-        temperature=settings.llm_temperature,
-    )
+    with obs.timed("llm"):
+        chat_completion = get_client().chat.completions.create(
+            messages=messages,
+            model=settings.groq_model,
+            temperature=settings.llm_temperature,
+        )
+    obs.add("llm_calls", 1)
+    usage = getattr(chat_completion, "usage", None)
+    if usage is not None:
+        obs.add("prompt_tokens", usage.prompt_tokens or 0)
+        obs.add("completion_tokens", usage.completion_tokens or 0)
     return (chat_completion.choices[0].message.content or "").strip()
 
 
@@ -98,7 +105,9 @@ def contextualize(state: RAGState) -> RAGState:
         *_history_messages(history),
         {"role": "user", "content": state["question"]},
     ]
-    rewritten = complete(messages)
+    with obs.timed("rewrite"):
+        rewritten = complete(messages)
+    obs.record(rewritten=True)
     return {"search_query": rewritten or state["question"]}
 
 
@@ -122,12 +131,20 @@ def group_sources(docs: list[Document]) -> list[SourceGroup]:
 
 def retrieve(state: RAGState) -> RAGState:
     settings = get_settings()
-    results = get_vectorstore().similarity_search_with_relevance_scores(
-        state["search_query"], k=settings.top_k
-    )
+    with obs.timed("retrieval"):
+        results = get_vectorstore().similarity_search_with_relevance_scores(
+            state["search_query"], k=settings.top_k
+        )
     # The nearest chunks are returned even for unrelated questions, so drop weak matches.
     docs = [doc for doc, score in results if score >= settings.relevance_threshold]
-    return {"documents": docs, "sources": group_sources(docs)}
+    sources = group_sources(docs)
+    obs.record(
+        chunks_retrieved=len(results),
+        chunks_kept=len(docs),
+        top_score=round(max((s for _, s in results), default=0.0), 3),
+        sources=len(sources),
+    )
+    return {"documents": docs, "sources": sources}
 
 
 def route_after_retrieve(state: RAGState) -> Literal["generate", "no_context"]:
@@ -147,7 +164,9 @@ def generate(state: RAGState) -> RAGState:
         *_history_messages(state.get("history") or []),
         {"role": "user", "content": state["question"]},
     ]
-    return {"answer": complete(messages)}
+    with obs.timed("generate"):
+        answer = complete(messages)
+    return {"answer": answer}
 
 
 def no_context(state: RAGState) -> RAGState:

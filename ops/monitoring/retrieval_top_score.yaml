@@ -1,0 +1,12 @@
+description: Best retrieval relevance score (0-1) per chat request
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="thistlewood-assistant" AND jsonPayload.event="chat" AND jsonPayload.top_score>=0'
+valueExtractor: EXTRACT(jsonPayload.top_score)
+metricDescriptor:
+  metricKind: DELTA
+  valueType: DISTRIBUTION
+  unit: "1"
+bucketOptions:
+  linearBuckets:
+    numFiniteBuckets: 20
+    width: 0.05
+    offset: 0
