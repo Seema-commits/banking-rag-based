@@ -86,6 +86,20 @@ No ports are hard-coded; they are settings with defaults:
 To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and set `PORT` in
 `backend/.env`. CORS allows any `localhost` port, so it needs no change.
 
+## Guardrails
+
+| Guardrail | Where |
+|---|---|
+| **PII masking**: Aadhaar, PAN, card numbers (Luhn-checked), account and phone numbers, emails, UPI IDs and OTP/PIN/CVV values are replaced with placeholders such as `[AADHAAR]` before the question or history reaches the LLM, the vector search or the logs; the user sees a privacy notice | `backend/app/guardrails/pii.py`, tests in `backend/tests/` |
+| **Grounded answers**: answer only from retrieved context, cite sources, say "not found" otherwise; never ask for personal details | `backend/app/rag/graph.py` (prompt) |
+| **Relevance threshold**: off-topic questions get "not found" without calling the LLM | `RELEVANCE_THRESHOLD` |
+| **Input limits**: question up to 2,000 characters, last 10 history messages | `backend/app/api/chat.py` |
+| **Rate limits**: per visitor per minute and a daily cap | `CHAT_REQUESTS_PER_MINUTE_PER_IP`, `CHAT_REQUESTS_PER_DAY` |
+| **Admin protection**: admin key (constant-time compare), PDF only, size limit | `backend/app/api/` |
+| **Safe rendering**: raw HTML in answers is never rendered | `frontend/src/components/Chat.jsx` |
+
+Run the tests from `backend/` with `pip install pytest` and `python -m pytest`.
+
 ## Deployment
 
 The app ships as one container: FastAPI serves the API and the built React app, and indexes
