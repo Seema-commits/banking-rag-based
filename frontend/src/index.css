@@ -123,3 +123,18 @@ td:first-child { white-space: normal; overflow-wrap: anywhere; }
   .topbar { padding: 10px 16px; }
   .bubble { max-width: 95%; }
 }
+
+/* Feedback and new chat */
+.feedback { display: flex; gap: 4px; margin-top: 6px; }
+.icon { background: none; border: 1px solid var(--border); padding: 2px 8px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+.icon:hover { background: var(--border); }
+.feedback-done { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.new-chat { align-self: center; white-space: nowrap; }
+
+/* Admin insights */
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.stat { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; min-width: 110px; }
+.stat b { display: block; font-size: 20px; }
+.stat span { font-size: 12px; color: var(--muted); }
+.card h3 { font-size: 14px; margin: 16px 0 8px; }
+.card td.wrap { white-space: normal; overflow-wrap: anywhere; }

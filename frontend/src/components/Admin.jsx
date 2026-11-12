@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
+import Insights from "./Insights.jsx";
 
 const KEY_STORAGE = "ragbased.adminKey";
 
@@ -182,6 +183,8 @@ export default function Admin() {
           </div>
         )}
       </div>
+
+      <Insights adminKey={adminKey} />
     </section>
   );
 }

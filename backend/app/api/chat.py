@@ -3,14 +3,15 @@ import time
 from typing import Literal
 
 import groq
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app import observability as obs
+from app.api import sessions
 from app.api.ratelimit import limit_chat
 from app.config import get_settings
 from app.guardrails.pii import mask_pii, privacy_notice
+from app.insights import store
 from app.rag.graph import LLMNotConfiguredError, get_graph
 
 logger = logging.getLogger(__name__)
@@ -18,14 +19,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
-class ChatMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str = Field(max_length=8000)
-
-
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    history: list[ChatMessage] = []
+    # Chat history lives on the server; the client only sends the id it got back last time.
+    # (A "history" field from older clients is ignored.)
+    session_id: str | None = Field(default=None, max_length=64)
 
 
 class Source(BaseModel):
@@ -37,8 +35,19 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
+    # answered, not_found, needs_account_access, financial_advice, off_topic, unsafe, unverified
+    outcome: str
+    session_id: str
+    # Id for thumbs-up/down feedback on this answer (None if interactions aren't stored).
+    message_id: str | None = None
     # Set when personal details were removed from the question before processing.
     notice: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str = Field(min_length=1, max_length=64)
+    rating: Literal["up", "down"]
+    comment: str | None = Field(default=None, max_length=500)
 
 
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
@@ -49,12 +58,9 @@ def chat(req: ChatRequest) -> ChatResponse:
     outcome = "error"
 
     # Guardrail: mask Aadhaar, PAN, card/account numbers, OTPs etc. before anything is sent
-    # to the LLM provider or the vector search. History is masked too, since it is resent.
+    # to the LLM provider, the vector search, the logs or the interaction store.
     question = mask_pii(req.question.strip())
-    history = [
-        {"role": m.role, "content": mask_pii(m.content).text}
-        for m in req.history[-settings.max_history_messages :]
-    ]
+    session_id, history = sessions.get_history(req.session_id, settings.max_history_messages)
     try:
         try:
             state = get_graph().invoke({"question": question.text, "history": history})
@@ -87,9 +93,24 @@ def chat(req: ChatRequest) -> ChatResponse:
             Source(doc_id=s["doc_id"], filename=s["filename"], page=s["page"])
             for s in state.get("sources") or []
         ]
-        outcome = "answered" if sources else "not_found"
+        outcome = state.get("outcome") or ("answered" if sources else "not_found")
+        answer = state["answer"]
+        sessions.append_turns(session_id, question.text, answer, settings.max_history_messages)
+
+        message_id = None
+        if settings.store_interactions:
+            try:
+                message_id = store.record_interaction(
+                    session_id=session_id, question=question.text, answer=answer, outcome=outcome,
+                    sources=[s.model_dump() for s in sources], top_score=metrics.get("top_score"),
+                    latency_ms=round((time.perf_counter() - started) * 1000, 1),
+                )
+            except Exception:
+                logger.exception("Could not store the interaction")  # never fail the answer for it
+
         return ChatResponse(
-            answer=state["answer"], sources=sources, notice=privacy_notice(question.found)
+            answer=answer, sources=sources, outcome=outcome, session_id=session_id,
+            message_id=message_id, notice=privacy_notice(question.found),
         )
     finally:
         # One structured line per request. No question or answer text, only numbers and flags.
@@ -97,7 +118,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         obs.log_event(
             logger,
             "chat",
-            level=logging.INFO if outcome in ("answered", "not_found") else logging.ERROR,
+            level=logging.ERROR if outcome.startswith("llm_") or outcome == "error" else logging.INFO,
             outcome=outcome,
             latency_ms=round((time.perf_counter() - started) * 1000, 1),
             question_chars=len(req.question),
@@ -107,3 +128,12 @@ def chat(req: ChatRequest) -> ChatResponse:
             total_tokens=tokens,
             **metrics,
         )
+
+
+@router.post("/feedback", status_code=status.HTTP_204_NO_CONTENT)
+def feedback(req: FeedbackRequest) -> None:
+    """Thumbs up/down (and an optional comment) on one answer."""
+    comment = mask_pii(req.comment).text if req.comment else None
+    if not store.set_feedback(req.message_id, req.rating, comment):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown message")
+    obs.log_event(logger, "feedback", rating=req.rating, has_comment=bool(comment))

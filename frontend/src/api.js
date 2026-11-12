@@ -25,12 +25,31 @@ async function request(path, { adminKey, headers, ...options } = {}) {
 }
 
 export const api = {
-  chat: (question, history) =>
+  // History is kept on the server; the client only sends the session id it got back.
+  chat: (question, sessionId) =>
     request("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, session_id: sessionId }),
     }),
+
+  feedback: (messageId, rating, comment) =>
+    request("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId, rating, comment: comment || null }),
+    }),
+
+  insights: (adminKey) => request("/api/admin/insights", { adminKey }),
+
+  // Returns the JSONL text of unanswered/downvoted questions for the eval set.
+  evalCandidates: async (adminKey) => {
+    const res = await fetch(`${BASE}/api/admin/insights/eval-candidates`, {
+      headers: { "X-Admin-Key": adminKey },
+    });
+    if (!res.ok) throw new Error(`Export failed (${res.status})`);
+    return res.text();
+  },
 
   verifyAdmin: (adminKey) => request("/api/admin/verify", { adminKey }),
 
