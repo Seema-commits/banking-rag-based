@@ -58,16 +58,6 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
     ]
     ids = _chunk_ids(doc_id, len(chunks))
 
-    store = get_vectorstore()
-    try:
-        for start in range(0, len(chunks), _BATCH_SIZE):
-            store.add_documents(
-                chunks[start : start + _BATCH_SIZE], ids=ids[start : start + _BATCH_SIZE]
-            )
-    except Exception:
-        store.delete(ids=ids)  # don't leave a half-indexed document behind
-        raise
-
     record = DocumentRecord(
         id=doc_id,
         filename=filename,
@@ -75,7 +65,19 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
         chunks=len(chunks),
         uploaded_at=DocumentRecord.now(),
     )
-    registry.add_document(record)
+
+    store = get_vectorstore()
+    try:
+        for start in range(0, len(chunks), _BATCH_SIZE):
+            store.add_documents(
+                chunks[start : start + _BATCH_SIZE], ids=ids[start : start + _BATCH_SIZE]
+            )
+        registry.add_document(record)
+    except Exception:
+        # Roll back so no chunks are left in the index without a registry entry
+        # (they would be searchable but impossible to delete from the Admin page).
+        store.delete(ids=ids)
+        raise
     return record
 
 

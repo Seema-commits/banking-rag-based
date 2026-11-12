@@ -46,12 +46,9 @@ def chat(req: ChatRequest) -> ChatResponse:
             status.HTTP_502_BAD_GATEWAY, "The assistant failed to answer. Please try again."
         )
 
-    # One source entry per (document, page), in retrieval order.
-    sources: dict[tuple[str, int], Source] = {}
-    for doc in state.get("documents") or []:
-        m = doc.metadata
-        key = (m.get("doc_id", ""), int(m.get("page", 0)))
-        sources.setdefault(
-            key, Source(doc_id=key[0], filename=m.get("filename", "unknown"), page=key[1])
-        )
-    return ChatResponse(answer=state["answer"], sources=list(sources.values()))
+    # Same order and numbering the LLM saw, so citation [n] matches source n in the UI.
+    sources = [
+        Source(doc_id=s["doc_id"], filename=s["filename"], page=s["page"])
+        for s in state.get("sources") or []
+    ]
+    return ChatResponse(answer=state["answer"], sources=sources)

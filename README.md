@@ -9,7 +9,7 @@ questions, and the chatbot answers from the retrieved chunks and cites its sourc
 | PDF loading / chunking | LangChain `PyPDFLoader`, `RecursiveCharacterTextSplitter` |
 | Embeddings | Hugging Face `sentence-transformers/all-MiniLM-L6-v2` (local, open source) |
 | Vector DB | Chroma (`langchain-chroma`, persisted to disk) |
-| LLM | Groq (`llama-3.3-70b-versatile` by default) |
+| LLM | Groq (`openai/gpt-oss-120b` by default, set with `GROQ_MODEL`) |
 | Backend | FastAPI (`backend/`) |
 | Frontend | React + Vite (`frontend/`) |
 
@@ -22,6 +22,11 @@ User question ─► [contextualize] ─► [retrieve] ─┬─► [generate]  
                   rewrite follow-ups            └─► [no_context] (nothing relevant found)
                   using chat history
 ```
+
+`retrieve` drops chunks whose relevance score (0–1) is below `RELEVANCE_THRESHOLD`, so
+off-topic questions reach `no_context` instead of being answered from unrelated text.
+Retrieved chunks are grouped by (document, page) and numbered once; the same numbers are
+used for the LLM's inline citations and the source list returned to the UI.
 
 The LangGraph graph is in `backend/app/rag/graph.py`, and ingestion is in `backend/app/rag/ingestion.py`.
 
