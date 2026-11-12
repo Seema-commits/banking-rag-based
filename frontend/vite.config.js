@@ -8,8 +8,8 @@ const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8731";
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5731,
-    // Fail with a clear error if 5731 is taken, instead of silently using another port.
+    port: 5175,
+    // Fail with a clear error if 5175 is taken, instead of silently using another port.
     strictPort: true,
     // Forward API calls to FastAPI during development.
     proxy: {

@@ -56,7 +56,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5731. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
+Open http://localhost:5175. The **Admin** tab asks for `ADMIN_API_KEY`. Use it to upload and delete PDFs.
 The **Chat** tab is the user-facing chatbot.
 
 ## Sample documents (Thistlewood Bank)
