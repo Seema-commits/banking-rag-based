@@ -106,6 +106,11 @@ The app ships as one container: FastAPI serves the API and the built React app, 
 the Thistlewood sample PDFs at startup. See [docs/deploy-cloud-run.md](docs/deploy-cloud-run.md)
 for a step-by-step Google Cloud Run guide.
 
+**Observability:** every chat request writes one structured JSON log line (outcome, latency per
+pipeline step, retrieval scores, Groq token usage, PII-masking flags; never question text).
+[docs/observability.md](docs/observability.md) shows how to query the logs and create
+log-based metrics, a Cloud Monitoring dashboard and an error alert from `ops/monitoring/`.
+
 ## Sample documents (Thistlewood Bank)
 
 `sample-docs/thistlewood/` contains four short PDFs for a **fictional** bank, Thistlewood Bank:

@@ -1,0 +1,11 @@
+description: Chat requests blocked by the rate limiter
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="thistlewood-assistant" AND jsonPayload.event="rate_limited"'
+metricDescriptor:
+  metricKind: DELTA
+  valueType: INT64
+  unit: "1"
+  labels:
+  - key: scope
+    valueType: STRING
+labelExtractors:
+  scope: EXTRACT(jsonPayload.scope)

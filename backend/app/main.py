@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import shutil
+import time
 import uuid
 
 from fastapi import FastAPI
@@ -11,15 +12,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api import admin, chat
 from app.config import get_settings
+from app.observability import configure_logging, log_event
 from app.rag import registry
 from app.rag.ingestion import ingest_pdf
 from app.rag.vectorstore import get_vectorstore
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+configure_logging(get_settings().log_format)
 logger = logging.getLogger(__name__)
-# Silence per-request HTTP logs from the Hugging Face / Groq clients.
-for noisy in ("httpx", "httpx2", "httpcore"):
-    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def seed_documents() -> None:
@@ -37,16 +36,21 @@ def seed_documents() -> None:
     if not pdfs:
         logger.warning("SEED_DOCS_DIR %s has no PDFs", folder)
         return
+    start = time.perf_counter()
+    seeded = chunks = 0
     for pdf in pdfs:
         doc_id = uuid.uuid4().hex
         dest = settings.upload_dir / f"{doc_id}.pdf"
         shutil.copy(pdf, dest)
         try:
             record = ingest_pdf(dest, doc_id, pdf.name)
+            seeded, chunks = seeded + 1, chunks + record.chunks
             logger.info("Seeded %s (%d chunks)", pdf.name, record.chunks)
         except Exception:
             dest.unlink(missing_ok=True)
             logger.exception("Failed to seed %s", pdf.name)
+    log_event(logger, "seed", documents=seeded, chunks=chunks,
+              duration_ms=round((time.perf_counter() - start) * 1000))
 
 
 @asynccontextmanager
@@ -60,8 +64,13 @@ async def lifespan(app: FastAPI):
     # Load the embedding model and open Chroma up front, so the first request isn't slow.
     # The first run downloads the model from Hugging Face.
     logger.info("Loading embedding model %s ...", settings.embedding_model)
+    start = time.perf_counter()
     await run_in_threadpool(get_vectorstore)
     await run_in_threadpool(seed_documents)
+    log_event(logger, "startup", duration_ms=round((time.perf_counter() - start) * 1000),
+              embedding_model=settings.embedding_model, llm_model=settings.groq_model,
+              top_k=settings.top_k, relevance_threshold=settings.relevance_threshold,
+              documents=len(registry.list_documents()))
     logger.info("Ready")
     yield
 

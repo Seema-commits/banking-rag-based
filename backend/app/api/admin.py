@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 
 from app.api.deps import require_admin
 from app.config import get_settings
+from app.observability import log_event
 from app.rag import registry
 from app.rag.ingestion import IngestionError, delete_document, ingest_pdf
 from app.rag.registry import DocumentRecord
@@ -68,12 +70,18 @@ def upload_documents(files: list[UploadFile] = File(...)) -> UploadResult:
 
         doc_id = uuid.uuid4().hex
         dest = settings.upload_dir / f"{doc_id}.pdf"
+        started = time.perf_counter()
         try:
             _save_upload(file, dest, max_bytes)
-            result.uploaded.append(ingest_pdf(dest, doc_id, filename))
+            record = ingest_pdf(dest, doc_id, filename)
+            result.uploaded.append(record)
+            log_event(logger, "document_indexed", pages=record.pages, chunks=record.chunks,
+                      size_kb=round(dest.stat().st_size / 1024),
+                      duration_ms=round((time.perf_counter() - started) * 1000))
         except IngestionError as exc:
             dest.unlink(missing_ok=True)
             result.failed.append(FailedUpload(filename=filename, error=str(exc)))
+            log_event(logger, "document_rejected", level=logging.WARNING, reason=str(exc))
         except Exception:
             dest.unlink(missing_ok=True)
             logger.exception("Failed to ingest %s", filename)

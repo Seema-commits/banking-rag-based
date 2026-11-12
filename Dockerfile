@@ -42,6 +42,7 @@ WORKDIR /app/backend
 
 # Cloud Run sets PORT (8080 by default). Secrets (GROQ_API_KEY, ADMIN_API_KEY) are passed at runtime.
 ENV HOST=0.0.0.0 \
+    LOG_FORMAT=json \
     PORT=8080 \
     RELOAD=false \
     HF_HUB_OFFLINE=1 \

@@ -1,0 +1,12 @@
+description: Groq tokens (prompt + completion) per chat request that called the LLM
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="thistlewood-assistant" AND jsonPayload.event="chat" AND jsonPayload.total_tokens>0'
+valueExtractor: EXTRACT(jsonPayload.total_tokens)
+metricDescriptor:
+  metricKind: DELTA
+  valueType: DISTRIBUTION
+  unit: "1"
+bucketOptions:
+  exponentialBuckets:
+    numFiniteBuckets: 20
+    growthFactor: 1.5
+    scale: 50
