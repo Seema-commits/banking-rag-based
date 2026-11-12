@@ -1,0 +1,4 @@
+# Never convert line endings in binary files (PDFs break if Git changes LF to CRLF on Windows).
+*.pdf binary
+*.png binary
+*.jpg binary

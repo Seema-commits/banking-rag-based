@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # Security / API
     admin_api_key: str = ""
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5731"]
 
 
 @lru_cache
