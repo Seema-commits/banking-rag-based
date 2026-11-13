@@ -292,7 +292,7 @@ def run_llm(rows, threshold, settings):
         latencies.append(time.perf_counter() - start)
         answer, sources = state["answer"], state.get("sources") or []
         outcome = state.get("outcome") or ("answered" if sources else "not_found")
-        refused = outcome != "answered" or "couldn't find" in answer.lower()
+        refused = outcome not in ("answered", "answered_web") or "couldn't find" in answer.lower()
         cited = [int(n) for n in re.findall(r"\[(\d+)\]", answer)]
         res = {"id": r["id"], "type": r["type"], "answer": answer, "refused": refused, "outcome": outcome,
                "sources": [(s["filename"], s["page"]) for s in sources]}

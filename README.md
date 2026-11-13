@@ -15,7 +15,8 @@ out-of-scope requests, with PII masking, observability and an evaluation harness
 |---|---|
 | Agent orchestration | LangGraph (conditional edges, bounded retry loops) |
 | LLM | Groq (`openai/gpt-oss-120b` by default, set with `GROQ_MODEL`) |
-| Retrieval | Chroma vector search + optional BM25 keyword search, fused with reciprocal rank fusion |
+| Retrieval | Chroma vector search + BM25 keyword search, fused with reciprocal rank fusion |
+| Tools | Web search (Tavily), limited to official sites, used only when the documents don't answer |
 | Embeddings | Hugging Face `sentence-transformers/all-MiniLM-L6-v2` (local, open source) |
 | PDF loading / chunking | LangChain `PyPDFLoader`, `RecursiveCharacterTextSplitter`, header/footer stripping |
 | Backend | FastAPI (`backend/`), SQLite for interactions and feedback |
@@ -48,6 +49,10 @@ Question ─► PII masking ─► [contextualize] ─► [retrieve] ─┬─ n
   example "home loan rate" next to a savings-rate table), which a similarity threshold cannot.
 - **rewrite_query:** if the documents seem not to cover it, retry once with wording closer to
   how the documents phrase things.
+- **web_search (tool):** if the documents still don't cover a banking question, the agent searches
+  an allowlist of official sites (`WEB_SEARCH_DOMAINS`, default rbi.org.in, uidai.gov.in,
+  incometax.gov.in, npci.org.in) with Tavily, grades those results the same way, and answers with
+  a 🌐 label and links. Off unless `TAVILY_API_KEY` is set (`backend/app/rag/websearch.py`).
 - **check_grounding:** the LLM verifies every factual claim (fees, limits, timelines, steps)
   against the excerpts; unsupported answers are regenerated once, then refused as "unverified".
 
@@ -119,6 +124,7 @@ To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and se
 | **PII masking**: Aadhaar, PAN, card numbers (Luhn-checked), account and phone numbers, emails, UPI IDs and OTP/PIN/CVV values are replaced with placeholders such as `[AADHAAR]` before the question or history reaches the LLM, the vector search or the logs; the user sees a privacy notice | `backend/app/guardrails/pii.py`, tests in `backend/tests/` |
 | **Scope grader**: refuses account-data requests, financial advice, off-topic and instruction-override attempts with a specific message | `grade` node, `backend/app/rag/graph.py` |
 | **Grounding check**: every factual claim verified against the sources; regenerate once, otherwise refuse | `check_grounding` node |
+| **Web tool limits**: official-site allowlist (enforced by the API and re-checked on each result URL), fallback only, results trimmed and treated as data, answers labelled as from the web | `backend/app/rag/websearch.py` |
 | **Prompt-injection resistance**: chat history kept on the server (clients only send a session id, so they can't forge assistant turns); documents wrapped in a `<documents>` block and treated as data, never instructions | `backend/app/api/sessions.py`, prompts in `graph.py` |
 | **Grounded answers**: answer only from retrieved context, cite sources, say "not found" otherwise; never ask for personal details | `backend/app/rag/graph.py` (prompt) |
 | **Relevance threshold**: off-topic questions get "not found" without calling the LLM | `RELEVANCE_THRESHOLD` |
@@ -268,5 +274,5 @@ citations point at returned sources and at the expected page. Full results are w
 | GET | `/api/health` | none | Health check |
 
 Uploaded files, the Chroma index, the document registry and the interaction database are
-stored in `backend/storage/`. `outcome` is one of `answered`, `small_talk`, `not_found`, `unverified`,
+stored in `backend/storage/`. `outcome` is one of `answered`, `answered_web`, `small_talk`, `not_found`, `unverified`,
 `needs_account_access`, `financial_advice`, `off_topic` or `unsafe`.

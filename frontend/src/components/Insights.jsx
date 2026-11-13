@@ -3,6 +3,7 @@ import { api } from "../api.js";
 
 const OUTCOME_LABELS = {
   answered: "Answered",
+  answered_web: "Answered from web search",
   small_talk: "Greetings / small talk",
   not_found: "Not in documents",
   unverified: "Couldn't verify",

@@ -5,6 +5,7 @@
     contextualize -> retrieve -+- nothing relevant ----------------------------> refuse
                                +- chunks -> grade -+- answerable -> generate -> check_grounding
                                                    +- not in documents -> rewrite_query -> retrieve
+                                                   |   (still not in documents) -> web_search -> grade
                                                    +- account / advice / off-topic / unsafe -> refuse
     check_grounding -+- grounded -> END
                      +- unsupported claims -> generate again (bounded) -> refuse ("unverified")
@@ -28,6 +29,7 @@ from app import observability as obs
 from app.config import get_settings
 from app.rag.retrieval import search
 from app.rag.smalltalk import small_talk_reply
+from app.rag.websearch import web_search, web_search_available
 
 
 class ChatTurn(TypedDict):
@@ -42,6 +44,7 @@ class SourceGroup(TypedDict):
     filename: str
     page: int
     chunks: list[str]
+    url: str | None  # set for web results (doc_id "web", page 0)
 
 
 class RAGState(TypedDict, total=False):
@@ -57,6 +60,7 @@ class RAGState(TypedDict, total=False):
     query_rewrites: int
     regenerations: int
     unsupported: list[str]  # claims the grounding check could not find in the sources
+    web_searched: bool  # the web tool has been used for this question
     outcome: str  # final: answered, not_found, needs_account_access, financial_advice,
     #               off_topic, unsafe, unverified
 
@@ -182,6 +186,18 @@ REGENERATE_NOTE = (
     "support, and if they don't answer the question, say you couldn't find it."
 )
 
+WEB_NOTE = (
+    "\n\nThe bank's own documents did not cover this question, so the documents above are pages "
+    "from official websites found by a web search. Answer only from them, say which website the "
+    "information comes from, and mention that the customer should check with the bank how it "
+    "applies to their account."
+)
+
+WEB_LABEL = (
+    "🌐 *Found on official websites, not in the bank's own documents. "
+    "Please check the linked page.*\n\n"
+)
+
 NO_CONTEXT_ANSWER = (
     "I couldn't find anything relevant in the uploaded documents. "
     "Try rephrasing your question, or ask an administrator to upload the relevant documents."
@@ -250,7 +266,7 @@ def group_sources(docs: list[Document]) -> list[SourceGroup]:
         key = (m.get("doc_id", ""), int(m.get("page", 0)))
         group = groups.setdefault(
             key,
-            SourceGroup(doc_id=key[0], filename=m.get("filename", "unknown"), page=key[1], chunks=[]),
+            SourceGroup(doc_id=key[0], filename=m.get("filename", "unknown"), page=key[1], chunks=[], url=None),
         )
         group["chunks"].append(d.page_content)
     return list(groups.values())
@@ -283,7 +299,9 @@ def _format_context(sources: list[SourceGroup]) -> str:
         return re.sub(r"</?\s*documents\s*>", "", text, flags=re.IGNORECASE)
 
     return "\n\n".join(
-        f"[{i}] (source: {s['filename']}, page {s['page']})\n" + "\n...\n".join(clean(c) for c in s["chunks"])
+        (f"[{i}] (web page: {s['filename']}, {s['url']})\n" if s.get("url")
+         else f"[{i}] (source: {s['filename']}, page {s['page']})\n")
+        + "\n...\n".join(clean(c) for c in s["chunks"])
         for i, s in enumerate(sources, start=1)
     )
 
@@ -313,13 +331,38 @@ def grade(state: RAGState) -> RAGState:
     return {"decision": decision}
 
 
-def route_after_grade(state: RAGState) -> Literal["generate", "rewrite_query", "refuse"]:
+def route_after_grade(state: RAGState) -> Literal["generate", "rewrite_query", "web_search", "refuse"]:
     decision = state.get("decision")
     if decision == "answer":
         return "generate"
-    if decision == "not_in_documents" and state.get("query_rewrites", 0) < get_settings().max_query_rewrites:
-        return "rewrite_query"
+    if decision == "not_in_documents":
+        if state.get("web_searched"):
+            return "refuse"  # the web didn't have it either
+        if state.get("query_rewrites", 0) < get_settings().max_query_rewrites:
+            return "rewrite_query"
+        if web_search_available():
+            return "web_search"
     return "refuse"
+
+
+def search_web(state: RAGState) -> RAGState:
+    """Tool call: search allowlisted official websites when the bank's documents don't answer."""
+    question = state.get("standalone_question") or state["question"]
+    with obs.timed("web_search"):
+        results = web_search(question)
+    obs.record(web_searched=True, web_results=len(results))
+    sources = [
+        SourceGroup(doc_id="web", filename=r.title, page=0, chunks=[r.content], url=r.url)
+        for r in results
+    ]
+    update = {"web_searched": True, "sources": sources, "documents": []}
+    if not sources:
+        update["decision"] = "not_in_documents"
+    return update
+
+
+def route_after_web_search(state: RAGState) -> Literal["grade", "refuse"]:
+    return "grade" if state.get("sources") else "refuse"
 
 
 def rewrite_query(state: RAGState) -> RAGState:
@@ -335,6 +378,8 @@ def rewrite_query(state: RAGState) -> RAGState:
 
 def generate(state: RAGState) -> RAGState:
     system = ANSWER_PROMPT.format(context=_format_context(state["sources"]))
+    if state.get("web_searched"):
+        system += WEB_NOTE
     if state.get("unsupported"):
         system += REGENERATE_NOTE.format(claims="; ".join(state["unsupported"]))
     messages = [
@@ -344,7 +389,9 @@ def generate(state: RAGState) -> RAGState:
     ]
     with obs.timed("generate"):
         answer = complete(messages)
-    return {"answer": answer, "outcome": "answered"}
+    # The "found on the web" label is added by the API after the grounding check, so the
+    # checker only sees the answer itself.
+    return {"answer": answer, "outcome": "answered_web" if state.get("web_searched") else "answered"}
 
 
 def route_after_generate(state: RAGState) -> Literal["check_grounding", "__end__"]:
@@ -394,7 +441,7 @@ def get_graph():
     graph = StateGraph(RAGState)
     for name, node in [("small_talk", small_talk), ("contextualize", contextualize), ("retrieve", retrieve), ("grade", grade),
                        ("rewrite_query", rewrite_query), ("generate", generate),
-                       ("check_grounding", check_grounding), ("refuse", refuse)]:
+                       ("check_grounding", check_grounding), ("web_search", search_web), ("refuse", refuse)]:
         graph.add_node(name, node)
 
     graph.add_conditional_edges(START, route_start)
@@ -403,6 +450,7 @@ def get_graph():
     graph.add_conditional_edges("retrieve", route_after_retrieve)
     graph.add_conditional_edges("grade", route_after_grade)
     graph.add_edge("rewrite_query", "retrieve")
+    graph.add_conditional_edges("web_search", route_after_web_search)
     graph.add_conditional_edges("generate", route_after_generate)
     graph.add_conditional_edges("check_grounding", route_after_grounding)
     graph.add_edge("refuse", END)
