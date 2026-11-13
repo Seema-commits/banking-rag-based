@@ -14,13 +14,19 @@ Masked personal data is reported by type only (for example `"pii_masked": ["AADH
 |---|---|---|
 | `chat` | Every chat request | `outcome`, `latency_ms`, `retrieval_ms`, `rewrite_ms`, `generate_ms`, `llm_ms`, `llm_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `top_score`, `chunks_kept`, `keyword_only_chunks`, `retrieval_mode`, `sources`, `rewritten`, `history_messages`, `question_chars`, `pii_masked`, `llm_model`, `error_type` |
 | `rate_limited` | A request is blocked by the rate limiter | `scope` (`per_ip_minute` or `daily`) |
+| `feedback` | A user clicks 👍 or 👎 | `rating`, `has_comment` |
 | `startup` | A new container starts | `duration_ms`, `embedding_model`, `llm_model`, `top_k`, `relevance_threshold`, `documents` |
 | `seed` | Sample PDFs indexed at startup | `documents`, `chunks`, `duration_ms` |
 | `document_indexed` / `document_rejected` | Admin upload | `pages`, `chunks`, `size_kb`, `duration_ms` / `reason` |
 
-`outcome` is one of: `answered`, `not_found` (no relevant documents), `llm_auth_error`
-(bad Groq key), `llm_rate_limited` (Groq quota), `llm_not_configured`, `error` (anything
-else; see `error_type`).
+`outcome` is one of: `answered`, `not_found` (no relevant documents), `unverified` (answer
+failed the grounding check), `needs_account_access`, `financial_advice`, `off_topic`, `unsafe`
+(refused by the grader), `llm_auth_error` (bad Groq key), `llm_rate_limited` (Groq quota),
+`llm_not_configured`, `error` (anything else; see `error_type`).
+
+Agent fields: `decision` (grader verdict), `grade_ms`, `query_rewrites`, `query_rewrite_ms`,
+`grounded`, `grounding_ms`, `unsupported_claims`, `regenerations`, and `grader_error` /
+`grounding_error` when an LLM check returned something unusable (the agent then fails open).
 
 Locally, logs stay readable text with the same fields appended as `key=value`.
 
@@ -44,6 +50,8 @@ Console → **Logging** → **Logs Explorer**. Paste a query and click **Run que
 |---|---|
 | All chat requests | `jsonPayload.event="chat"` |
 | Questions with no relevant documents | `jsonPayload.outcome="not_found"` |
+| Questions the grader refused | `jsonPayload.event="chat" AND jsonPayload.decision!="answer"` |
+| Answers that failed the grounding check | `jsonPayload.grounded=false` |
 | Errors only | `jsonPayload.event="chat" AND severity>=ERROR` |
 | Slow answers (over 5 s) | `jsonPayload.latency_ms>5000` |
 | Messages where an Aadhaar number was masked | `jsonPayload.pii_masked="AADHAAR"` |
@@ -90,7 +98,8 @@ chart** to a new dashboard.
 Console → **Monitoring** → **Alerting** → **Create policy**:
 
 1. **Select a metric**: search `chat_requests` → choose **logging/user/chat_requests** → **Apply**.
-2. **Add filter**: `outcome` **!=** `answered`, then add another: `outcome` **!=** `not_found`.
+2. **Add filter**: `outcome` **=~** `llm_.*|error` (the failure outcomes; refusals like
+   `off_topic` or `not_found` are normal behaviour, not errors).
 3. Rolling window **5 min**, function **sum**.
 4. **Configure trigger**: threshold, **Above threshold**, value **0**.
 5. **Notifications**: **Manage notification channels** → add **Email** with your address →

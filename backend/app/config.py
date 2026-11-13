@@ -27,22 +27,32 @@ class Settings(BaseSettings):
     # Ingestion
     upload_dir: Path = BASE_DIR / "storage" / "uploads"
     registry_path: Path = BASE_DIR / "storage" / "documents.json"
+    # Question/answer log and feedback for the admin Insights tab (questions are PII-masked).
+    store_interactions: bool = True
+    interactions_db: Path = BASE_DIR / "storage" / "interactions.db"
     chunk_size: int = 1000
     chunk_overlap: int = 200
     # Drop lines that repeat on most pages of a PDF (headers, footers, "Page N") before chunking,
     # so they don't add noise to every chunk.
-    strip_repeated_lines: bool = False
+    strip_repeated_lines: bool = True
     max_upload_mb: int = 25
 
     # Retrieval
     top_k: int = 4
     # "vector" (embeddings only) or "hybrid" (embeddings + BM25 keyword search, merged with
     # reciprocal rank fusion). Hybrid catches exact terms such as "closure", "Form 60", "CKYC".
-    retrieval_mode: str = "vector"
-    # Chunks scoring below this (0 = unrelated, 1 = identical) are dropped, so off-topic
-    # questions get the "not found" answer. 0 disables the filter. Tune with the eval set.
-    relevance_threshold: float = 0.3
+    retrieval_mode: str = "hybrid"
+    # If no chunk scores at least this (0 = unrelated, 1 = identical), the question gets the
+    # "not found" answer without calling the LLM. Tuned for recall (eval: 0.15 keeps 100% of
+    # real questions); the LLM grader handles the harder out-of-scope cases.
+    relevance_threshold: float = 0.15
     max_history_messages: int = 10
+
+    # Agent / self-correction (each LLM check adds one Groq call)
+    self_correction: bool = True  # LLM grades retrieved chunks and decides: answer, retry or refuse
+    grounding_check: bool = True  # LLM verifies the answer's claims against the sources
+    max_query_rewrites: int = 1  # retries with a reworded search when the chunks don't answer
+    max_regenerations: int = 1  # retries when the answer has unsupported claims
 
     # Server (used by run.py; Cloud Run and similar hosts set PORT for you)
     host: str = "127.0.0.1"

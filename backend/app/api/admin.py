@@ -1,13 +1,16 @@
+import json
 import logging
 import time
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from app.api.deps import require_admin
 from app.config import get_settings
+from app.insights import store
 from app.observability import log_event
 from app.rag import registry
 from app.rag.ingestion import IngestionError, delete_document, ingest_pdf
@@ -95,3 +98,20 @@ def remove_document(doc_id: str) -> None:
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
     delete_document(record)
+
+
+@router.get("/insights")
+def get_insights() -> dict:
+    """Usage, answer rate, feedback, unanswered questions and downvoted answers."""
+    return store.insights()
+
+
+@router.get("/insights/eval-candidates", response_class=PlainTextResponse)
+def export_eval_candidates() -> PlainTextResponse:
+    """Unanswered and downvoted questions as JSON lines, ready to label for eval/questions.jsonl."""
+    lines = "\n".join(json.dumps(c, ensure_ascii=False) for c in store.eval_candidates())
+    return PlainTextResponse(
+        lines + ("\n" if lines else ""),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": 'attachment; filename="eval-candidates.jsonl"'},
+    )

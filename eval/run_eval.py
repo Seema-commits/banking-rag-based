@@ -7,6 +7,7 @@ Usage (from the project root, with the backend virtualenv active):
     python eval/run_eval.py --llm                 # also run the full pipeline (needs GROQ_API_KEY)
     python eval/run_eval.py --docs sample-docs/thistlewood path/to/RBI-KYC-Master-Direction.pdf
     python eval/run_eval.py --compare             # before/after table for the retrieval variants
+    SELF_CORRECTION=false python eval/run_eval.py --llm   # answers without the agent checks
 
 Retrieval uses the app's own search (backend/app/rag/retrieval.py), so the results reflect
 CHUNK_SIZE, STRIP_REPEATED_LINES and RETRIEVAL_MODE from backend/.env unless --compare is used.
@@ -279,7 +280,7 @@ def run_single(args, settings, pdfs, tmp):
 
 
 def run_llm(rows, threshold, settings):
-    from app.rag.graph import NO_CONTEXT_ANSWER, get_graph
+    from app.rag.graph import get_graph
 
     settings.relevance_threshold = threshold
     graph = get_graph()
@@ -290,9 +291,10 @@ def run_llm(rows, threshold, settings):
         state = graph.invoke({"question": r["question"], "history": []})
         latencies.append(time.perf_counter() - start)
         answer, sources = state["answer"], state.get("sources") or []
-        refused = answer == NO_CONTEXT_ANSWER or "couldn't find" in answer.lower()
+        outcome = state.get("outcome") or ("answered" if sources else "not_found")
+        refused = outcome != "answered" or "couldn't find" in answer.lower()
         cited = [int(n) for n in re.findall(r"\[(\d+)\]", answer)]
-        res = {"id": r["id"], "type": r["type"], "answer": answer, "refused": refused,
+        res = {"id": r["id"], "type": r["type"], "answer": answer, "refused": refused, "outcome": outcome,
                "sources": [(s["filename"], s["page"]) for s in sources]}
         if r["type"] == "in_scope":
             res["citations_ok"] = bool(cited) and all(1 <= n <= len(sources) for n in cited)
@@ -316,14 +318,19 @@ def run_llm(rows, threshold, settings):
         "refused_out_of_scope": rate(oos, "refused"),
         "avg_latency_s": round(sum(latencies) / len(latencies), 2),
     }
-    print("Answer metrics")
+    outcomes = {}
+    for x in results:
+        outcomes[x["outcome"]] = outcomes.get(x["outcome"], 0) + 1
+    print(f"Answer metrics (self_correction={settings.self_correction}, "
+          f"grounding_check={settings.grounding_check})")
     for k, v in summary.items():
         print(f"  {k:22s} {v if k == 'avg_latency_s' else pct(v)}")
+    print("  outcomes               " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())))
     for x in results:
         if (x["type"] == "in_scope" and not (x["citations_ok"] and x["keywords"])) or \
            (x["type"] == "out_of_scope" and not x["refused"]):
             print(f"  CHECK {x['id']}: {x['answer'][:150]!r}")
-    return {"summary": summary, "results": results}
+    return {"summary": summary, "outcomes": outcomes, "results": results}
 
 
 if __name__ == "__main__":

@@ -15,12 +15,45 @@ const markdownComponents = {
   ),
 };
 
+function Feedback({ message, onRate }) {
+  if (!message.messageId) return null;
+  if (message.rating) {
+    return <p className="feedback-done">Thanks for your feedback.</p>;
+  }
+  return (
+    <div className="feedback" aria-label="Was this answer helpful?">
+      <button type="button" className="icon" title="Helpful" onClick={() => onRate(message, "up")}>
+        👍
+      </button>
+      <button type="button" className="icon" title="Not helpful" onClick={() => onRate(message, "down")}>
+        👎
+      </button>
+    </div>
+  );
+}
+
 export default function Chat() {
-  // Each message: { role: "user" | "assistant", content, sources?, error? }
+  // Each message: { role, content, sources?, notice?, outcome?, messageId?, rating?, error? }
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const sessionId = useRef(null); // conversation id; the server keeps the history
   const bottomRef = useRef(null);
+
+  function newChat() {
+    sessionId.current = null;
+    setMessages([]);
+  }
+
+  async function rate(message, rating) {
+    const comment = rating === "down" ? window.prompt("What was wrong? (optional)") : null;
+    try {
+      await api.feedback(message.messageId, rating, comment);
+      setMessages((prev) => prev.map((m) => (m === message ? { ...m, rating } : m)));
+    } catch {
+      /* feedback is best-effort */
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,19 +64,22 @@ export default function Chat() {
     const question = input.trim();
     if (!question || loading) return;
 
-    // Only send successful turns as history.
-    const history = messages
-      .filter((m) => !m.error)
-      .map(({ role, content }) => ({ role, content }));
-
     setMessages((prev) => [...prev, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
     try {
-      const res = await api.chat(question, history);
+      const res = await api.chat(question, sessionId.current);
+      sessionId.current = res.session_id;
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: res.answer, sources: res.sources, notice: res.notice },
+        {
+          role: "assistant",
+          content: res.answer,
+          sources: res.sources,
+          notice: res.notice,
+          outcome: res.outcome,
+          messageId: res.message_id,
+        },
       ]);
     } catch (err) {
       setMessages((prev) => [
@@ -79,6 +115,7 @@ export default function Chat() {
                 <p>{m.content}</p>
               )}
               {m.notice && <p className="notice">{m.notice}</p>}
+              {m.role === "assistant" && !m.error && <Feedback message={m} onRate={rate} />}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   <span>Sources:</span>
@@ -101,6 +138,11 @@ export default function Chat() {
       </div>
 
       <form className="composer" onSubmit={send}>
+        {messages.length > 0 && (
+          <button type="button" className="link new-chat" onClick={newChat} disabled={loading}>
+            New chat
+          </button>
+        )}
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
