@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     # (the Docker image points this at sample-docs/thistlewood). Empty = off.
     seed_docs_dir: Path | None = None
 
+    # Answer cache: repeated questions (without earlier conversation) are answered instantly.
+    # Cleared when documents change; an answer marked 👎 is removed.
+    answer_cache_enabled: bool = True
+    answer_cache_ttl_seconds: int = 6 * 60 * 60
+    answer_cache_max_entries: int = 500
+
+    # Stream the answer to the browser as it is written (the final, checked answer replaces it).
+    stream_answer: bool = True
+
     # Example questions shown as clickable buttons on the empty chat screen and after a greeting.
     suggested_questions: list[str] = [
         "What documents do I need to open an account?",

@@ -18,7 +18,8 @@ from app.api.ratelimit import limit_chat
 from app.config import get_settings
 from app.guardrails.pii import mask_pii, privacy_notice
 from app.insights import store
-from app.rag.graph import WEB_LABEL, LLMNotConfiguredError, get_graph
+from app.rag import answer_cache
+from app.rag.graph import WEB_LABEL, LLMNotConfiguredError, get_graph, set_token_sink
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ class ChatResponse(BaseModel):
     notice: str | None = None
     # Example questions to show as clickable buttons (after a greeting).
     suggestions: list[str] = []
+    # True when the answer came from the answer cache (a repeated question).
+    cached: bool = False
     # Server-side processing time and the time per agent step, in milliseconds.
     latency_ms: float = 0
     timings: dict[str, float] = {}
@@ -74,8 +77,17 @@ def _run_graph(inputs: dict, on_step: Callable[[str], None] | None) -> dict:
     return state
 
 
-def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> ChatResponse:
-    """Answer one question. Raises HTTPException with a user-facing message on failure."""
+# Outcomes worth caching: real answers and deliberate refusals, not errors or small talk.
+_CACHEABLE = {"answered", "answered_web", "not_found", "needs_account_access", "financial_advice",
+              "off_topic", "unsafe"}
+
+
+def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
+             on_token: Callable[[str], None] | None = None) -> ChatResponse:
+    """Answer one question. Raises HTTPException with a user-facing message on failure.
+
+    on_step(step) is called as each agent step starts; on_token(text) receives the answer text
+    while it is being written (before the grounding check; the returned answer is final)."""
     settings = get_settings()
     metrics = obs.start_request()
     started = time.perf_counter()
@@ -87,7 +99,11 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> 
     session_id, history = sessions.get_history(req.session_id, settings.max_history_messages)
     try:
         try:
-            state = _run_graph({"question": question.text, "history": history}, on_step)
+            token = set_token_sink(on_token)
+            try:
+                state = _run_graph({"question": question.text, "history": history}, on_step)
+            finally:
+                token.var.reset(token)
         except LLMNotConfiguredError as exc:
             outcome = "llm_not_configured"
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
@@ -118,6 +134,12 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> 
             for s in state.get("sources") or []
         ]
         outcome = state.get("outcome") or ("answered" if sources else "not_found")
+        # Cache by the standalone question (follow-ups already resolved by the agent).
+        cached = bool(state.get("cached"))
+        cache_question = state.get("standalone_question") or question.text
+        cacheable = outcome in _CACHEABLE
+        if cacheable and not cached:
+            answer_cache.put(cache_question, {k: state.get(k) for k in ("answer", "sources", "outcome", "suggestions")})
         # Some models emit their own citation style, e.g. "【1†L1-L5】"; normalise it to "[1]".
         answer = re.sub(r"【\s*(\d+)[^】]*】", r"[\1]", state["answer"])
         if outcome == "answered_web":
@@ -134,11 +156,14 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> 
                 )
             except Exception:
                 logger.exception("Could not store the interaction")  # never fail the answer for it
+        if message_id and cacheable:
+            answer_cache.link_message(message_id, cache_question)  # so 👎 can evict it
 
         return ChatResponse(
             answer=answer, sources=sources, outcome=outcome, session_id=session_id,
             message_id=message_id, notice=privacy_notice(question.found),
             suggestions=state.get("suggestions") or [],
+            cached=cached,
             latency_ms=round((time.perf_counter() - started) * 1000, 1),
             timings={k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
         )
@@ -171,14 +196,21 @@ def _sse(event: dict) -> str:
 
 @router.post("/chat/stream", dependencies=[Depends(limit_chat)])
 def chat_stream(req: ChatRequest) -> StreamingResponse:
-    """Same as /api/chat, as server-sent events: {"type": "step", "step": "<node>"} as each
-    agent step starts (so the UI can show progress), then {"type": "result", ...ChatResponse}
-    or {"type": "error", "status": <code>, "detail": "<message>"}."""
+    """Same as /api/chat, as server-sent events:
+    {"type": "step", "step": "<node>"} as each agent step starts (so the UI can show progress),
+    {"type": "token", "text": "..."} while the answer is written (a draft: it is checked
+    afterwards, and a new "generate" step means the draft is being rewritten),
+    then {"type": "result", ...ChatResponse} or {"type": "error", "status": <code>, "detail": "..."}.
+    The result's answer is the final one and replaces the draft."""
     events: queue.Queue = queue.Queue()
 
     def worker() -> None:
         try:
-            result = run_chat(req, on_step=lambda step: events.put({"type": "step", "step": step}))
+            result = run_chat(
+                req,
+                on_step=lambda step: events.put({"type": "step", "step": step}),
+                on_token=lambda text: events.put({"type": "token", "text": text}),
+            )
             events.put({"type": "result", **result.model_dump()})
         except HTTPException as exc:
             events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
@@ -209,4 +241,6 @@ def feedback(req: FeedbackRequest) -> None:
     comment = mask_pii(req.comment).text if req.comment else None
     if not store.set_feedback(req.message_id, req.rating, comment):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown message")
+    if req.rating == "down" and answer_cache.evict_message(req.message_id):
+        logger.info("Removed a downvoted answer from the cache")
     obs.log_event(logger, "feedback", rating=req.rating, has_comment=bool(comment))

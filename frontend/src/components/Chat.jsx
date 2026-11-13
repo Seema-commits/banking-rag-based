@@ -65,6 +65,7 @@ function ResponseTime({ message }) {
   return (
     <p className="response-time" title={detail}>
       Answered in {seconds(message.elapsedMs)}
+      {message.cached && " (cached)"}
       <span className="response-detail"> ({detail})</span>
     </p>
   );
@@ -89,6 +90,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(null); // current agent step while waiting
+  const [draft, setDraft] = useState(""); // answer text streaming in, before it is checked
   const sessionId = useRef(null); // conversation id; the server keeps the history
   const [starters, setStarters] = useState([]); // example questions for the empty screen
   const bottomRef = useRef(null);
@@ -130,7 +132,15 @@ export default function Chat() {
     setLoading(true);
     try {
       const started = performance.now();
-      const res = await api.chatStream(question, sessionId.current, setStep);
+      const res = await api.chatStream(
+        question,
+        sessionId.current,
+        (name) => {
+          setStep(name);
+          if (name === "generate") setDraft(""); // a new (or rewritten) answer starts
+        },
+        (text) => setDraft((d) => d + text)
+      );
       const elapsedMs = performance.now() - started;
       sessionId.current = res.session_id;
       setMessages((prev) => [
@@ -144,6 +154,7 @@ export default function Chat() {
           suggestions: res.suggestions,
           elapsedMs,
           latencyMs: res.latency_ms,
+          cached: res.cached,
           timings: res.timings,
           messageId: res.message_id,
         },
@@ -156,6 +167,7 @@ export default function Chat() {
     } finally {
       setLoading(false);
       setStep(null);
+      setDraft("");
     }
   }
 
@@ -208,7 +220,16 @@ export default function Chat() {
         ))}
         {loading && (
           <div className="msg assistant">
-            <div className="bubble typing">{STEP_LABELS[step] || "Thinking…"}</div>
+            {draft ? (
+              <div className="bubble draft">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {cleanAnswer(draft)}
+                </ReactMarkdown>
+                <p className="draft-status">{STEP_LABELS[step] || "Writing the answer…"}</p>
+              </div>
+            ) : (
+              <div className="bubble typing">{STEP_LABELS[step] || "Thinking…"}</div>
+            )}
           </div>
         )}
         <div ref={bottomRef} />

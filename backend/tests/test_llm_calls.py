@@ -92,3 +92,24 @@ def test_falls_back_to_main_model_when_check_model_is_gone(monkeypatch):
     assert graph.complete([{"role": "user", "content": "y"}], fast=True) == "ok"
     # first call tries the check model, then falls back; later calls go straight to the main model
     assert seen == ["retired-model", "openai/gpt-oss-120b", "openai/gpt-oss-120b"]
+
+
+def test_complete_stream_passes_pieces_and_returns_full_text(monkeypatch):
+    def chunk(text=None, usage=None):
+        delta = types.SimpleNamespace(content=text)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(delta=delta)] if usage is None else [],
+                                     x_groq=types.SimpleNamespace(usage=usage) if usage else None)
+
+    seen_kwargs = {}
+
+    def create(**kwargs):
+        seen_kwargs.update(kwargs)
+        usage = types.SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+        return iter([chunk("Video "), chunk(None), chunk("KYC [1]."), chunk(usage=usage)])
+
+    client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)))
+    monkeypatch.setattr(graph, "get_client", lambda: client)
+    pieces = []
+    assert graph.complete_stream([{"role": "user", "content": "x"}], pieces.append) == "Video KYC [1]."
+    assert pieces == ["Video ", "KYC [1]."]
+    assert seen_kwargs["stream"] is True and seen_kwargs["model"] == get_settings().groq_model
