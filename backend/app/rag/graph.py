@@ -16,6 +16,7 @@ the simple pipeline contextualize -> retrieve -> generate.
 """
 
 import json
+import logging
 import re
 from functools import lru_cache
 from typing import Literal, TypedDict
@@ -30,6 +31,8 @@ from app.config import get_settings
 from app.rag.retrieval import search
 from app.rag.smalltalk import WITH_SUGGESTIONS, small_talk_reply
 from app.rag.websearch import web_search, web_search_available
+
+logger = logging.getLogger(__name__)
 
 
 class ChatTurn(TypedDict):
@@ -78,28 +81,55 @@ def get_client() -> Groq:
     return Groq(api_key=settings.groq_api_key)
 
 
-def complete(messages: list[dict], json_mode: bool = False, fast: bool = False) -> str:
-    """One Groq chat completion; returns the assistant's text.
+_check_model_failed = False  # set once the fast check model is found unusable (e.g. retired)
 
-    fast=True is for the agent's quick internal steps (rewriting a question, grading chunks,
-    checking grounding): it asks reasoning models such as gpt-oss for low reasoning effort,
-    which makes those calls much quicker. The customer-facing answer uses the model's default.
-    """
+
+def _supports_reasoning_effort(model: str) -> bool:
+    return "gpt-oss" in model or "qwen3" in model
+
+
+def _create(model: str, messages: list[dict], json_mode: bool, fast: bool):
     settings = get_settings()
     extras = {}
     if json_mode:
         extras["response_format"] = {"type": "json_object"}
-    if fast and settings.check_reasoning_effort:
+    if fast and settings.check_reasoning_effort and _supports_reasoning_effort(model):
         extras["reasoning_effort"] = settings.check_reasoning_effort
-    base = {"messages": messages, "model": settings.groq_model, "temperature": settings.llm_temperature}
+    base = {"messages": messages, "model": model, "temperature": settings.llm_temperature}
+    try:
+        return get_client().chat.completions.create(**base, **extras)
+    except groq.BadRequestError:
+        if not extras:
+            raise
+        # The model doesn't support JSON mode or reasoning_effort; the prompts still work.
+        return get_client().chat.completions.create(**base)
+
+
+def complete(messages: list[dict], json_mode: bool = False, fast: bool = False) -> str:
+    """One Groq chat completion; returns the assistant's text.
+
+    fast=True is for the agent's quick internal steps (rewriting a question, grading chunks,
+    checking grounding). Those run on CHECK_MODEL, a small fast model, when one is set, with low
+    reasoning effort on reasoning models. If the check model fails (for example it was retired),
+    the call falls back to the main model and keeps using it. The customer-facing answer always
+    uses GROQ_MODEL with its default settings.
+    """
+    global _check_model_failed
+    settings = get_settings()
+    model = settings.groq_model
+    if fast and settings.check_model and not _check_model_failed:
+        model = settings.check_model
     with obs.timed("llm"):
         try:
-            chat_completion = get_client().chat.completions.create(**base, **extras)
-        except groq.BadRequestError:
-            if not extras:
+            chat_completion = _create(model, messages, json_mode, fast)
+        except (groq.NotFoundError, groq.BadRequestError, groq.PermissionDeniedError) as exc:
+            if model == settings.groq_model:
                 raise
-            # The model doesn't support JSON mode or reasoning_effort; the prompts still work.
-            chat_completion = get_client().chat.completions.create(**base)
+            _check_model_failed = True
+            logger.warning("CHECK_MODEL %s failed (%s); using %s for checks", model,
+                           type(exc).__name__, settings.groq_model)
+            model = settings.groq_model
+            chat_completion = _create(model, messages, json_mode, fast)
     obs.add("llm_calls", 1)
     usage = getattr(chat_completion, "usage", None)
     if usage is not None:
@@ -199,6 +229,10 @@ WEB_NOTE = (
     "information comes from, and mention that the customer should check with the bank how it "
     "applies to their account."
 )
+
+_NOT_FOUND = re.compile(
+    r"\b(?:couldn'?t|could not|can'?t|cannot|unable to) (?:find|locate)\b|\bnot (?:mentioned|covered|"
+    r"included|available) in the (?:documents|pages|sources)", re.IGNORECASE)
 
 WEB_LABEL = (
     "🌐 *Found on official websites, not in the bank's own documents. "
@@ -344,11 +378,14 @@ def route_after_grade(state: RAGState) -> Literal["generate", "rewrite_query", "
     if decision == "answer":
         return "generate"
     if decision == "not_in_documents":
+        settings = get_settings()
         if state.get("web_searched"):
             return "refuse"  # the web didn't have it either
-        if state.get("query_rewrites", 0) < get_settings().max_query_rewrites:
+        web = web_search_available()
+        # With the web tool on, go straight to it (fewer LLM calls) unless asked to retry first.
+        if (not web or settings.rewrite_before_web) and state.get("query_rewrites", 0) < settings.max_query_rewrites:
             return "rewrite_query"
-        if web_search_available():
+        if web:
             return "web_search"
     return "refuse"
 
@@ -369,8 +406,12 @@ def search_web(state: RAGState) -> RAGState:
     return update
 
 
-def route_after_web_search(state: RAGState) -> Literal["grade", "refuse"]:
-    return "grade" if state.get("sources") else "refuse"
+def route_after_web_search(state: RAGState) -> Literal["grade", "generate", "refuse"]:
+    if not state.get("sources"):
+        return "refuse"
+    # Results come only from allowlisted official sites and the answer is grounding-checked,
+    # so grading them again is optional (GRADE_WEB_RESULTS) and skipped by default for speed.
+    return "grade" if get_settings().grade_web_results else "generate"
 
 
 def rewrite_query(state: RAGState) -> RAGState:
@@ -399,10 +440,15 @@ def generate(state: RAGState) -> RAGState:
         answer = complete(messages)
     # The "found on the web" label is added by the API after the grounding check, so the
     # checker only sees the answer itself.
+    if state.get("web_searched") and _NOT_FOUND.search(answer):
+        # The web pages didn't answer it either: refuse rather than show a labelled non-answer.
+        return {"answer": answer, "decision": "not_in_documents", "outcome": "not_found"}
     return {"answer": answer, "outcome": "answered_web" if state.get("web_searched") else "answered"}
 
 
-def route_after_generate(state: RAGState) -> Literal["check_grounding", "__end__"]:
+def route_after_generate(state: RAGState) -> Literal["check_grounding", "refuse", "__end__"]:
+    if state.get("outcome") == "not_found":
+        return "refuse"
     settings = get_settings()
     return "check_grounding" if settings.self_correction and settings.grounding_check else END
 
