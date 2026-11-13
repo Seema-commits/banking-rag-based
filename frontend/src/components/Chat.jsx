@@ -43,6 +43,33 @@ const STEP_LABELS = {
   check_grounding: "Verifying the answer against the sources…",
 };
 
+const TIMING_LABELS = {
+  rewrite: "follow-up",
+  retrieval: "document search",
+  grade: "check",
+  query_rewrite: "search retry",
+  web_search: "web search",
+  generate: "answer",
+  grounding: "verify",
+};
+
+const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
+
+// "Answered in 3.4 s"; hover for the server time and the time per agent step.
+function ResponseTime({ message }) {
+  if (message.elapsedMs == null) return null;
+  const steps = Object.entries(message.timings || {})
+    .filter(([, ms]) => ms > 0)
+    .map(([step, ms]) => `${TIMING_LABELS[step] || step} ${seconds(ms)}`);
+  const detail = [`server ${seconds(message.latencyMs || 0)}`, ...steps].join(" · ");
+  return (
+    <p className="response-time" title={detail}>
+      Answered in {seconds(message.elapsedMs)}
+      <span className="response-detail"> ({detail})</span>
+    </p>
+  );
+}
+
 function Suggestions({ items, onPick, disabled }) {
   if (!items?.length) return null;
   return (
@@ -102,7 +129,9 @@ export default function Chat() {
     setInput("");
     setLoading(true);
     try {
+      const started = performance.now();
       const res = await api.chatStream(question, sessionId.current, setStep);
+      const elapsedMs = performance.now() - started;
       sessionId.current = res.session_id;
       setMessages((prev) => [
         ...prev,
@@ -113,6 +142,9 @@ export default function Chat() {
           notice: res.notice,
           outcome: res.outcome,
           suggestions: res.suggestions,
+          elapsedMs,
+          latencyMs: res.latency_ms,
+          timings: res.timings,
           messageId: res.message_id,
         },
       ]);
@@ -154,6 +186,7 @@ export default function Chat() {
               <Suggestions items={m.suggestions} onPick={ask} disabled={loading} />
               {m.notice && <p className="notice">{m.notice}</p>}
               {m.role === "assistant" && !m.error && <Feedback message={m} onRate={rate} />}
+              {m.role === "assistant" && !m.error && <ResponseTime message={m} />}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   <span>Sources:</span>

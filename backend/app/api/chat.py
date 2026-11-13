@@ -52,6 +52,9 @@ class ChatResponse(BaseModel):
     notice: str | None = None
     # Example questions to show as clickable buttons (after a greeting).
     suggestions: list[str] = []
+    # Server-side processing time and the time per agent step, in milliseconds.
+    latency_ms: float = 0
+    timings: dict[str, float] = {}
 
 
 class FeedbackRequest(BaseModel):
@@ -136,6 +139,8 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> 
             answer=answer, sources=sources, outcome=outcome, session_id=session_id,
             message_id=message_id, notice=privacy_notice(question.found),
             suggestions=state.get("suggestions") or [],
+            latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            timings={k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
         )
     finally:
         # One structured line per request. No question or answer text, only numbers and flags.
