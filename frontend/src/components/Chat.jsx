@@ -32,6 +32,17 @@ function Feedback({ message, onRate }) {
   );
 }
 
+// What the assistant is doing, shown while waiting (agent step names from the server).
+const STEP_LABELS = {
+  contextualize: "Understanding your question…",
+  retrieve: "Searching the bank's documents…",
+  grade: "Checking what I found…",
+  rewrite_query: "Trying a different search…",
+  web_search: "Searching official websites…",
+  generate: "Writing the answer…",
+  check_grounding: "Verifying the answer against the sources…",
+};
+
 function Suggestions({ items, onPick, disabled }) {
   if (!items?.length) return null;
   return (
@@ -50,6 +61,7 @@ export default function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(null); // current agent step while waiting
   const sessionId = useRef(null); // conversation id; the server keeps the history
   const [starters, setStarters] = useState([]); // example questions for the empty screen
   const bottomRef = useRef(null);
@@ -90,7 +102,7 @@ export default function Chat() {
     setInput("");
     setLoading(true);
     try {
-      const res = await api.chat(question, sessionId.current);
+      const res = await api.chatStream(question, sessionId.current, setStep);
       sessionId.current = res.session_id;
       setMessages((prev) => [
         ...prev,
@@ -111,6 +123,7 @@ export default function Chat() {
       ]);
     } finally {
       setLoading(false);
+      setStep(null);
     }
   }
 
@@ -162,7 +175,7 @@ export default function Chat() {
         ))}
         {loading && (
           <div className="msg assistant">
-            <div className="bubble typing">Thinking…</div>
+            <div className="bubble typing">{STEP_LABELS[step] || "Thinking…"}</div>
           </div>
         )}
         <div ref={bottomRef} />

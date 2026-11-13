@@ -35,6 +35,43 @@ export const api = {
 
   suggestions: () => request("/api/suggestions"),
 
+  // Same as chat(), but calls onStep(stepName) as each agent step starts. Resolves to the answer.
+  chatStream: async (question, sessionId, onStep) => {
+    const res = await fetch(`${BASE}/api/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, session_id: sessionId }),
+    });
+    if (!res.ok || !res.body) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        if (typeof body.detail === "string") message = body.detail;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(message);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.slice(0, end).replace(/^data: /, "");
+        buffer = buffer.slice(end + 2);
+        const event = JSON.parse(line);
+        if (event.type === "step") onStep?.(event.step);
+        else if (event.type === "result") return event;
+        else if (event.type === "error") throw new Error(event.detail || "Request failed");
+      }
+    }
+    throw new Error("The connection closed before the answer arrived. Please try again.");
+  },
+
   feedback: (messageId, rating, comment) =>
     request("/api/feedback", {
       method: "POST",

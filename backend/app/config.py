@@ -53,8 +53,11 @@ class Settings(BaseSettings):
     grounding_check: bool = True  # LLM verifies the answer's claims against the sources
     max_query_rewrites: int = 1  # retries with a reworded search when the chunks don't answer
     max_regenerations: int = 1  # retries when the answer has unsupported claims
-    # Reasoning effort for the agent's internal checks on reasoning models (gpt-oss): "low" makes
-    # grading, rewriting and grounding checks much faster. Empty = model default.
+    # Model for the agent's internal checks (grading, rewriting, grounding check). A small fast
+    # model makes these much quicker; the customer-facing answer always uses GROQ_MODEL.
+    # Empty = use GROQ_MODEL for everything. Falls back to GROQ_MODEL if this model fails.
+    check_model: str = "llama-3.1-8b-instant"
+    # Reasoning effort for checks on reasoning models (gpt-oss, qwen3): "low" is faster.
     check_reasoning_effort: str = "low"
 
     # Web search tool (Tavily): used only when the documents don't answer a banking question,
@@ -63,6 +66,11 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     web_search_domains: list[str] = ["rbi.org.in", "uidai.gov.in", "incometax.gov.in", "npci.org.in"]
     web_search_max_results: int = 4
+    # Speed: with the web tool on, skip the query-rewrite retry and go straight to the web, and
+    # don't re-grade web results (they come only from allowlisted sites and the answer is still
+    # grounding-checked). Set these to true for the slower, more cautious path.
+    rewrite_before_web: bool = False
+    grade_web_results: bool = False
 
     # Server (used by run.py; Cloud Run and similar hosts set PORT for you)
     host: str = "127.0.0.1"

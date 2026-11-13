@@ -58,9 +58,17 @@ Question ─► PII masking ─► [contextualize] ─► [retrieve] ─┬─ n
   against the excerpts; unsupported answers are regenerated once, then refused as "unverified".
 
 The agent is in `backend/app/rag/graph.py`, retrieval in `backend/app/rag/retrieval.py`, and
-ingestion in `backend/app/rag/ingestion.py`. The agent's internal checks (grading, query
-rewriting, grounding) ask the model for low reasoning effort (`CHECK_REASONING_EFFORT=low`), which
-keeps them fast; the customer-facing answer uses the model's default. Set `SELF_CORRECTION=false` for the plain
+ingestion in `backend/app/rag/ingestion.py`.
+
+**Speed.** The agent's internal checks (grading, query rewriting, grounding) run on a small fast
+model (`CHECK_MODEL`, default `llama-3.1-8b-instant`, falling back to `GROQ_MODEL` if it is
+unavailable), while the customer-facing answer uses `GROQ_MODEL`. When the documents don't
+answer, the agent goes straight to the web tool and doesn't re-grade the allowlisted results
+(`REWRITE_BEFORE_WEB`, `GRADE_WEB_RESULTS` restore the slower, more cautious path). The chat
+calls `/api/chat/stream`, which reports each agent step as it starts, so the UI shows progress
+such as "Searching official websites…" instead of a silent wait.
+
+Set `SELF_CORRECTION=false` for the plain
 retrieve-then-generate pipeline (fewer LLM calls), or `GROUNDING_CHECK=false` to skip only the
 grounding check.
 
@@ -268,6 +276,8 @@ citations point at returned sources and at the expected page. Full results are w
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/api/chat` | none | `{question, session_id?}` → `{answer, sources, outcome, session_id, message_id, notice}` |
+| POST | `/api/chat/stream` | none | Same as `/api/chat` as server-sent events: `{type: "step", step}` per agent step, then `{type: "result", ...}` or `{type: "error", status, detail}` |
+| GET | `/api/suggestions` | none | Example questions for the chat screen |
 | POST | `/api/feedback` | none | `{message_id, rating: "up" \| "down", comment?}` |
 | GET | `/api/admin/documents` | `X-Admin-Key` | List indexed documents |
 | POST | `/api/admin/documents` | `X-Admin-Key` | Upload one or more PDFs (multipart `files`) |

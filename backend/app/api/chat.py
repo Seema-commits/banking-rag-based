@@ -1,10 +1,15 @@
+import json
 import logging
+import queue
 import re
+import threading
 import time
+from collections.abc import Callable, Iterator
 from typing import Literal
 
 import groq
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import observability as obs
@@ -55,8 +60,19 @@ class FeedbackRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=500)
 
 
-@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
-def chat(req: ChatRequest) -> ChatResponse:
+def _run_graph(inputs: dict, on_step: Callable[[str], None] | None) -> dict:
+    """Run the agent and return its final state, reporting each step as it starts."""
+    state: dict = {}
+    for mode, chunk in get_graph().stream(inputs, stream_mode=["tasks", "values"]):
+        if mode == "values":
+            state = chunk
+        elif on_step and "input" in chunk and "result" not in chunk:
+            on_step(chunk["name"])
+    return state
+
+
+def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None) -> ChatResponse:
+    """Answer one question. Raises HTTPException with a user-facing message on failure."""
     settings = get_settings()
     metrics = obs.start_request()
     started = time.perf_counter()
@@ -68,7 +84,7 @@ def chat(req: ChatRequest) -> ChatResponse:
     session_id, history = sessions.get_history(req.session_id, settings.max_history_messages)
     try:
         try:
-            state = get_graph().invoke({"question": question.text, "history": history})
+            state = _run_graph({"question": question.text, "history": history}, on_step)
         except LLMNotConfiguredError as exc:
             outcome = "llm_not_configured"
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
@@ -137,6 +153,43 @@ def chat(req: ChatRequest) -> ChatResponse:
             total_tokens=tokens,
             **metrics,
         )
+
+
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(limit_chat)])
+def chat(req: ChatRequest) -> ChatResponse:
+    return run_chat(req)
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/stream", dependencies=[Depends(limit_chat)])
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """Same as /api/chat, as server-sent events: {"type": "step", "step": "<node>"} as each
+    agent step starts (so the UI can show progress), then {"type": "result", ...ChatResponse}
+    or {"type": "error", "status": <code>, "detail": "<message>"}."""
+    events: queue.Queue = queue.Queue()
+
+    def worker() -> None:
+        try:
+            result = run_chat(req, on_step=lambda step: events.put({"type": "step", "step": step}))
+            events.put({"type": "result", **result.model_dump()})
+        except HTTPException as exc:
+            events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception:  # run_chat already converts pipeline errors; this is a last resort
+            logger.exception("Streaming chat failed")
+            events.put({"type": "error", "status": 500, "detail": "The assistant failed to answer."})
+        finally:
+            events.put(None)
+
+    def stream() -> Iterator[str]:
+        threading.Thread(target=worker, daemon=True).start()
+        while (event := events.get()) is not None:
+            yield _sse(event)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/suggestions")

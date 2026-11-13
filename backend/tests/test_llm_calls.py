@@ -32,6 +32,11 @@ def calls(monkeypatch):
 
     client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)))
     monkeypatch.setattr(graph, "get_client", lambda: client)
+    monkeypatch.setattr(graph, "_check_model_failed", False)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "groq_model", "openai/gpt-oss-120b")
+    monkeypatch.setattr(settings, "check_model", "")
+    monkeypatch.setattr(settings, "check_reasoning_effort", "low")
     return seen
 
 
@@ -57,3 +62,33 @@ def test_reasoning_effort_can_be_disabled(calls, monkeypatch):
     monkeypatch.setattr(get_settings(), "check_reasoning_effort", "")
     graph.complete([{"role": "user", "content": "x"}], fast=True)
     assert "reasoning_effort" not in calls[0]
+
+
+def test_checks_use_fast_model_and_answers_use_main_model(calls, monkeypatch):
+    monkeypatch.setattr(get_settings(), "check_model", "llama-3.1-8b-instant")
+    graph.complete_json([{"role": "user", "content": "grade"}])
+    graph.complete([{"role": "user", "content": "answer"}])
+    assert calls[0]["model"] == "llama-3.1-8b-instant"
+    assert "reasoning_effort" not in calls[0]  # not a reasoning model
+    assert calls[1]["model"] == "openai/gpt-oss-120b"
+
+
+def test_falls_back_to_main_model_when_check_model_is_gone(monkeypatch):
+    seen = []
+
+    def create(**kwargs):
+        seen.append(kwargs["model"])
+        if kwargs["model"] == "retired-model":
+            raise groq.NotFoundError("model_not_found",
+                                     response=httpx.Response(404, request=httpx.Request("POST", "https://x")), body=None)
+        return _reply("ok")
+
+    client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)))
+    monkeypatch.setattr(graph, "get_client", lambda: client)
+    monkeypatch.setattr(graph, "_check_model_failed", False)
+    monkeypatch.setattr(get_settings(), "groq_model", "openai/gpt-oss-120b")
+    monkeypatch.setattr(get_settings(), "check_model", "retired-model")
+    assert graph.complete([{"role": "user", "content": "x"}], fast=True) == "ok"
+    assert graph.complete([{"role": "user", "content": "y"}], fast=True) == "ok"
+    # first call tries the check model, then falls back; later calls go straight to the main model
+    assert seen == ["retired-model", "openai/gpt-oss-120b", "openai/gpt-oss-120b"]
