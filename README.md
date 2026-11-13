@@ -181,21 +181,50 @@ about 60% of the time, and **no similarity threshold can separate hard negatives
 rate at Thistlewood", 0.57) from real questions (many score around 0.3). That motivated the
 LLM grader and the retrieval improvements below.
 
-To fill in the comparison, run on a machine with the embedding model:
+### Retrieval improvements
+
+Measured with `python eval/run_eval.py --compare` (37 answerable + 9 out-of-scope questions,
+top 4 chunks). "No threshold" columns measure ranking quality alone.
+
+| Variant | Chunks | Hit@4 (no threshold) | Top-1 (no threshold) | Best threshold | Hit@4 | Top-1 | Refusal |
+|---|---|---|---|---|---|---|---|
+| Baseline (1000 chars, vector) | 23 | 97.3% | 62.2% | 0.30 | 89.2% | 56.8% | 55.6% |
+| + strip headers/footers | 20 | **100.0%** | 75.7% | 0.15 | 100.0% | 75.7% | 44.4% |
+| + 500-character chunks | 37 | 94.6% | 75.7% | 0.60 | 59.5% | 54.1% | 100.0% |
+| + hybrid BM25 (500 chars) | 37 | 94.6% | 75.7% | 0.60 | 59.5% | 51.4% | 100.0% |
+| **Hybrid BM25 (1000 chars), chosen** | 20 | **100.0%** | **78.4%** | 0.35 | 89.2% | 67.6% | 55.6% |
+
+What we learned:
+
+- **Stripping the repeated footer** was the biggest single win: top-1 from 62.2% to 75.7% and
+  every answer page retrieved. The footer ("Thistlewood Bank is fictional…") was in every chunk,
+  so it diluted the real content and boosted any question that mentioned the bank.
+- **Smaller chunks hurt**: with 500-character chunks some answers were split away from their
+  context (hit@4 fell to 94.6%), so the default stays at 1000 characters.
+- **Hybrid BM25 + vector** ranked the right page first most often (**78.4%**, +16 points over the
+  baseline), helping exact-term questions such as "charge for closing my account".
+- **The threshold alone can't refuse well**: the only setting that refused every off-topic
+  question (0.60) also dropped 40% of real questions. So refusal moved to the **LLM grader**, and
+  the threshold was retuned for recall: **0.15 keeps 100% of real questions** and only filters
+  obvious noise.
+
+**Defaults now:** `STRIP_REPEATED_LINES=true`, `RETRIEVAL_MODE=hybrid`, `CHUNK_SIZE=1000`,
+`RELEVANCE_THRESHOLD=0.15`, with the LLM grader and grounding check on.
+
+### Answer quality with the agent
+
+Run `python eval\run_eval.py --llm` (agent on), and with `SELF_CORRECTION=false` for the plain
+pipeline, to compare answered rate, citation accuracy and out-of-scope refusal:
 
 ```powershell
-python eval\run_eval.py --compare               # retrieval variants: strip footers, 500-char chunks, hybrid BM25
-python eval\run_eval.py --llm                   # answers with the agent (grader + grounding check)
-$env:SELF_CORRECTION="false"; python eval\run_eval.py --llm; Remove-Item Env:SELF_CORRECTION   # answers without the agent
+python eval\run_eval.py --llm
+$env:SELF_CORRECTION="false"; python eval\run_eval.py --llm; Remove-Item Env:SELF_CORRECTION
 ```
 
-| Variant | Hit@4 | Top-1 | Refusal (off-topic) |
-|---|---|---|---|
-| Baseline (1000 chars, vector) | 89.2% | 56.8% | 55.6% |
-| + strip headers/footers | _run --compare_ | | |
-| + 500-character chunks | | | |
-| + hybrid BM25 | | | |
-| + LLM grader and grounding check (`--llm`) | | | |
+| Pipeline | Answered (in-scope) | Cited the right page | Refused out-of-scope | Avg latency |
+|---|---|---|---|---|
+| Plain retrieve → generate | _run --llm_ | | | |
+| Agent (grader + grounding check) | | | | |
 
 ## Evaluation
 
