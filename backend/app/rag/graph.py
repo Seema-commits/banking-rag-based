@@ -1,5 +1,7 @@
 """LangGraph pipeline: a self-correcting RAG agent.
 
+    (greetings, thanks, "what can you do?" -> small_talk -> END, no search or LLM call)
+
     contextualize -> retrieve -+- nothing relevant ----------------------------> refuse
                                +- chunks -> grade -+- answerable -> generate -> check_grounding
                                                    +- not in documents -> rewrite_query -> retrieve
@@ -25,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 from app import observability as obs
 from app.config import get_settings
 from app.rag.retrieval import search
+from app.rag.smalltalk import small_talk_reply
 
 
 class ChatTurn(TypedDict):
@@ -207,6 +210,17 @@ REFUSALS = {
 _DECISIONS = {"answer", "not_in_documents", "needs_account_access", "financial_advice", "off_topic", "unsafe"}
 
 
+def route_start(state: RAGState) -> Literal["small_talk", "contextualize"]:
+    return "small_talk" if small_talk_reply(state["question"]) else "contextualize"
+
+
+def small_talk(state: RAGState) -> RAGState:
+    """Greetings, thanks, goodbyes and "what can you do?": a friendly reply, no search, no LLM."""
+    kind, reply = small_talk_reply(state["question"])
+    obs.record(small_talk=kind)
+    return {"answer": reply, "outcome": "small_talk", "sources": [], "documents": []}
+
+
 def contextualize(state: RAGState) -> RAGState:
     history = state.get("history") or []
     base = {"query_rewrites": 0, "regenerations": 0, "unsupported": []}
@@ -378,12 +392,13 @@ def refuse(state: RAGState) -> RAGState:
 @lru_cache
 def get_graph():
     graph = StateGraph(RAGState)
-    for name, node in [("contextualize", contextualize), ("retrieve", retrieve), ("grade", grade),
+    for name, node in [("small_talk", small_talk), ("contextualize", contextualize), ("retrieve", retrieve), ("grade", grade),
                        ("rewrite_query", rewrite_query), ("generate", generate),
                        ("check_grounding", check_grounding), ("refuse", refuse)]:
         graph.add_node(name, node)
 
-    graph.add_edge(START, "contextualize")
+    graph.add_conditional_edges(START, route_start)
+    graph.add_edge("small_talk", END)
     graph.add_edge("contextualize", "retrieve")
     graph.add_conditional_edges("retrieve", route_after_retrieve)
     graph.add_conditional_edges("grade", route_after_grade)
