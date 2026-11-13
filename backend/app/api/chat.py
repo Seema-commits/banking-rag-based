@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import Literal
 
@@ -44,6 +45,8 @@ class ChatResponse(BaseModel):
     message_id: str | None = None
     # Set when personal details were removed from the question before processing.
     notice: str | None = None
+    # Example questions to show as clickable buttons (after a greeting).
+    suggestions: list[str] = []
 
 
 class FeedbackRequest(BaseModel):
@@ -96,7 +99,8 @@ def chat(req: ChatRequest) -> ChatResponse:
             for s in state.get("sources") or []
         ]
         outcome = state.get("outcome") or ("answered" if sources else "not_found")
-        answer = state["answer"]
+        # Some models emit their own citation style, e.g. "【1†L1-L5】"; normalise it to "[1]".
+        answer = re.sub(r"【\s*(\d+)[^】]*】", r"[\1]", state["answer"])
         if outcome == "answered_web":
             answer = WEB_LABEL + answer
         sessions.append_turns(session_id, question.text, answer, settings.max_history_messages)
@@ -115,6 +119,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         return ChatResponse(
             answer=answer, sources=sources, outcome=outcome, session_id=session_id,
             message_id=message_id, notice=privacy_notice(question.found),
+            suggestions=state.get("suggestions") or [],
         )
     finally:
         # One structured line per request. No question or answer text, only numbers and flags.
@@ -132,6 +137,12 @@ def chat(req: ChatRequest) -> ChatResponse:
             total_tokens=tokens,
             **metrics,
         )
+
+
+@router.get("/suggestions")
+def suggestions() -> list[str]:
+    """Example questions for the empty chat screen."""
+    return get_settings().suggested_questions
 
 
 @router.post("/feedback", status_code=status.HTTP_204_NO_CONTENT)

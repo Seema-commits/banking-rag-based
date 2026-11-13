@@ -33,6 +33,8 @@ export const api = {
       body: JSON.stringify({ question, session_id: sessionId }),
     }),
 
+  suggestions: () => request("/api/suggestions"),
+
   feedback: (messageId, rating, comment) =>
     request("/api/feedback", {
       method: "POST",

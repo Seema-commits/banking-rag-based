@@ -32,12 +32,26 @@ function Feedback({ message, onRate }) {
   );
 }
 
+function Suggestions({ items, onPick, disabled }) {
+  if (!items?.length) return null;
+  return (
+    <div className="suggestions">
+      {items.map((q) => (
+        <button key={q} type="button" className="suggestion" onClick={() => onPick(q)} disabled={disabled}>
+          {q}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Chat() {
   // Each message: { role, content, sources?, notice?, outcome?, messageId?, rating?, error? }
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const sessionId = useRef(null); // conversation id; the server keeps the history
+  const [starters, setStarters] = useState([]); // example questions for the empty screen
   const bottomRef = useRef(null);
 
   function newChat() {
@@ -59,9 +73,17 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  async function send(e) {
+  useEffect(() => {
+    api.suggestions().then(setStarters).catch(() => setStarters([]));
+  }, []);
+
+  function send(e) {
     e.preventDefault();
-    const question = input.trim();
+    ask(input);
+  }
+
+  async function ask(text) {
+    const question = text.trim();
     if (!question || loading) return;
 
     setMessages((prev) => [...prev, { role: "user", content: question }]);
@@ -78,6 +100,7 @@ export default function Chat() {
           sources: res.sources,
           notice: res.notice,
           outcome: res.outcome,
+          suggestions: res.suggestions,
           messageId: res.message_id,
         },
       ]);
@@ -100,8 +123,9 @@ export default function Chat() {
       <div className="messages">
         {messages.length === 0 && (
           <div className="empty">
-            <h2>Ask a question about the uploaded documents</h2>
-            <p>Answers are based only on documents uploaded by the administrator.</p>
+            <h2>Ask a question about the bank's services</h2>
+            <p>Answers come from the bank's documents, with sources. Try one of these:</p>
+            <Suggestions items={starters} onPick={ask} disabled={loading} />
           </div>
         )}
         {messages.map((m, i) => (
@@ -114,6 +138,7 @@ export default function Chat() {
               ) : (
                 <p>{m.content}</p>
               )}
+              <Suggestions items={m.suggestions} onPick={ask} disabled={loading} />
               {m.notice && <p className="notice">{m.notice}</p>}
               {m.role === "assistant" && !m.error && <Feedback message={m} onRate={rate} />}
               {m.sources?.length > 0 && (
@@ -121,8 +146,8 @@ export default function Chat() {
                   <span>Sources:</span>
                   {m.sources.map((s, j) =>
                     s.url ? (
-                      <a key={s.url} className="source" href={s.url} target="_blank" rel="noopener noreferrer">
-                        [{j + 1}] 🌐 {new URL(s.url).hostname}
+                      <a key={s.url} className="source" href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}>
+                        [{j + 1}] 🌐 {s.filename.length > 45 ? `${s.filename.slice(0, 45)}…` : s.filename}
                       </a>
                     ) : (
                       <span key={`${s.doc_id}-${s.page}`} className="source">
