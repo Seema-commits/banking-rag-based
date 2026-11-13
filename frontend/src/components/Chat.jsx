@@ -43,6 +43,34 @@ const STEP_LABELS = {
   check_grounding: "Verifying the answer against the sources…",
 };
 
+const TIMING_LABELS = {
+  rewrite: "follow-up",
+  retrieval: "document search",
+  grade: "check",
+  query_rewrite: "search retry",
+  web_search: "web search",
+  generate: "answer",
+  grounding: "verify",
+};
+
+const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
+
+// "Answered in 3.4 s"; hover for the server time and the time per agent step.
+function ResponseTime({ message }) {
+  if (message.elapsedMs == null) return null;
+  const steps = Object.entries(message.timings || {})
+    .filter(([, ms]) => ms > 0)
+    .map(([step, ms]) => `${TIMING_LABELS[step] || step} ${seconds(ms)}`);
+  const detail = [`server ${seconds(message.latencyMs || 0)}`, ...steps].join(" · ");
+  return (
+    <p className="response-time" title={detail}>
+      Answered in {seconds(message.elapsedMs)}
+      {message.cached && " (cached)"}
+      <span className="response-detail"> ({detail})</span>
+    </p>
+  );
+}
+
 function Suggestions({ items, onPick, disabled }) {
   if (!items?.length) return null;
   return (
@@ -62,6 +90,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(null); // current agent step while waiting
+  const [draft, setDraft] = useState(""); // answer text streaming in, before it is checked
   const sessionId = useRef(null); // conversation id; the server keeps the history
   const [starters, setStarters] = useState([]); // example questions for the empty screen
   const bottomRef = useRef(null);
@@ -102,7 +131,17 @@ export default function Chat() {
     setInput("");
     setLoading(true);
     try {
-      const res = await api.chatStream(question, sessionId.current, setStep);
+      const started = performance.now();
+      const res = await api.chatStream(
+        question,
+        sessionId.current,
+        (name) => {
+          setStep(name);
+          if (name === "generate") setDraft(""); // a new (or rewritten) answer starts
+        },
+        (text) => setDraft((d) => d + text)
+      );
+      const elapsedMs = performance.now() - started;
       sessionId.current = res.session_id;
       setMessages((prev) => [
         ...prev,
@@ -113,6 +152,10 @@ export default function Chat() {
           notice: res.notice,
           outcome: res.outcome,
           suggestions: res.suggestions,
+          elapsedMs,
+          latencyMs: res.latency_ms,
+          cached: res.cached,
+          timings: res.timings,
           messageId: res.message_id,
         },
       ]);
@@ -124,6 +167,7 @@ export default function Chat() {
     } finally {
       setLoading(false);
       setStep(null);
+      setDraft("");
     }
   }
 
@@ -154,6 +198,7 @@ export default function Chat() {
               <Suggestions items={m.suggestions} onPick={ask} disabled={loading} />
               {m.notice && <p className="notice">{m.notice}</p>}
               {m.role === "assistant" && !m.error && <Feedback message={m} onRate={rate} />}
+              {m.role === "assistant" && !m.error && <ResponseTime message={m} />}
               {m.sources?.length > 0 && (
                 <div className="sources">
                   <span>Sources:</span>
@@ -175,7 +220,16 @@ export default function Chat() {
         ))}
         {loading && (
           <div className="msg assistant">
-            <div className="bubble typing">{STEP_LABELS[step] || "Thinking…"}</div>
+            {draft ? (
+              <div className="bubble draft">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {cleanAnswer(draft)}
+                </ReactMarkdown>
+                <p className="draft-status">{STEP_LABELS[step] || "Writing the answer…"}</p>
+              </div>
+            ) : (
+              <div className="bubble typing">{STEP_LABELS[step] || "Thinking…"}</div>
+            )}
           </div>
         )}
         <div ref={bottomRef} />

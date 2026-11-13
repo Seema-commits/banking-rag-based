@@ -11,6 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.config import get_settings
 from app.rag import registry
 from app.rag.registry import DocumentRecord
+from app.rag import answer_cache
 from app.rag.retrieval import invalidate_keyword_index
 from app.rag.vectorstore import get_vectorstore
 
@@ -117,6 +118,7 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
         store.delete(ids=ids)
         raise
     invalidate_keyword_index()
+    answer_cache.clear()  # answers may change now that the documents have
     return record
 
 
@@ -126,3 +128,4 @@ def delete_document(record: DocumentRecord) -> None:
     (get_settings().upload_dir / f"{record.id}.pdf").unlink(missing_ok=True)
     registry.remove_document(record.id)
     invalidate_keyword_index()
+    answer_cache.clear()

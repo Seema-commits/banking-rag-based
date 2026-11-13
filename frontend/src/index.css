@@ -148,3 +148,13 @@ a.source:hover { text-decoration: underline; }
 .suggestion:hover:not(:disabled) { background: rgba(47, 111, 237, 0.08); }
 .suggestion:disabled { opacity: 0.5; cursor: default; }
 .empty .suggestions { justify-content: center; }
+
+/* Response time under answers; the step breakdown shows on wide screens and on hover */
+.response-time { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.response-detail { display: none; }
+.response-time:hover .response-detail { display: inline; }
+
+/* Answer streaming in, before the grounding check confirms it */
+.msg.assistant .bubble.draft { background: var(--assistant-bubble); border: 1px dashed var(--border); }
+.bubble.draft > :not(.draft-status) { opacity: 0.6; }
+.draft-status { margin: 6px 0 0; font-size: 12px; font-style: italic; color: var(--muted); }

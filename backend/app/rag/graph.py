@@ -1,6 +1,7 @@
 """LangGraph pipeline: a self-correcting RAG agent.
 
     (greetings, thanks, "what can you do?" -> small_talk -> END, no search or LLM call)
+    (contextualize -> check_cache: a repeated question is answered from the cache -> END)
 
     contextualize -> retrieve -+- nothing relevant ----------------------------> refuse
                                +- chunks -> grade -+- answerable -> generate -> check_grounding
@@ -15,9 +16,11 @@ The LLM decides the path at `grade` and `check_grounding`; loops are bounded by 
 the simple pipeline contextualize -> retrieve -> generate.
 """
 
+import contextvars
 import json
 import logging
 import re
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Literal, TypedDict
 
@@ -28,6 +31,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app import observability as obs
 from app.config import get_settings
+from app.rag import answer_cache
 from app.rag.retrieval import search
 from app.rag.smalltalk import WITH_SUGGESTIONS, small_talk_reply
 from app.rag.websearch import web_search, web_search_available
@@ -65,6 +69,7 @@ class RAGState(TypedDict, total=False):
     unsupported: list[str]  # claims the grounding check could not find in the sources
     web_searched: bool  # the web tool has been used for this question
     suggestions: list[str]  # clickable example questions to show with the answer
+    cached: bool  # the answer came from the answer cache
     outcome: str  # final: answered, not_found, needs_account_access, financial_advice,
     #               off_topic, unsafe, unverified
 
@@ -136,6 +141,35 @@ def complete(messages: list[dict], json_mode: bool = False, fast: bool = False) 
         obs.add("prompt_tokens", usage.prompt_tokens or 0)
         obs.add("completion_tokens", usage.completion_tokens or 0)
     return (chat_completion.choices[0].message.content or "").strip()
+
+
+# Where the answer text goes while it is being written (set by the streaming chat endpoint).
+_token_sink: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
+    "token_sink", default=None)
+
+
+def set_token_sink(sink: Callable[[str], None] | None) -> contextvars.Token:
+    return _token_sink.set(sink)
+
+
+def complete_stream(messages: list[dict], on_token: Callable[[str], None]) -> str:
+    """Like complete(), on GROQ_MODEL, but passes each piece of text to on_token as it arrives."""
+    settings = get_settings()
+    parts: list[str] = []
+    with obs.timed("llm"):
+        stream = get_client().chat.completions.create(
+            messages=messages, model=settings.groq_model, temperature=settings.llm_temperature, stream=True)
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                parts.append(delta)
+                on_token(delta)
+            usage = getattr(getattr(chunk, "x_groq", None), "usage", None)
+            if usage is not None:
+                obs.add("prompt_tokens", usage.prompt_tokens or 0)
+                obs.add("completion_tokens", usage.completion_tokens or 0)
+    obs.add("llm_calls", 1)
+    return "".join(parts).strip()
 
 
 def complete_json(messages: list[dict]) -> dict | None:
@@ -348,6 +382,20 @@ def _format_context(sources: list[SourceGroup]) -> str:
     )
 
 
+def check_cache(state: RAGState) -> RAGState:
+    """Serve a repeated question from the answer cache. Runs after contextualize, so the key is
+    the standalone question: follow-ups like "what about NRIs?" are resolved first."""
+    hit = answer_cache.get(state.get("standalone_question") or state["question"])
+    if hit is None:
+        return {}
+    obs.record(cached=True)
+    return {**hit, "documents": [], "cached": True}
+
+
+def route_after_cache(state: RAGState) -> Literal["retrieve", "__end__"]:
+    return END if state.get("cached") else "retrieve"
+
+
 def route_after_retrieve(state: RAGState) -> Literal["grade", "generate", "refuse"]:
     if not state.get("sources"):
         return "refuse"
@@ -436,8 +484,12 @@ def generate(state: RAGState) -> RAGState:
         *_history_messages(state.get("history") or []),
         {"role": "user", "content": state["question"]},
     ]
+    sink = _token_sink.get()
     with obs.timed("generate"):
-        answer = complete(messages)
+        if sink is not None and get_settings().stream_answer:
+            answer = complete_stream(messages, sink)
+        else:
+            answer = complete(messages)
     # The "found on the web" label is added by the API after the grounding check, so the
     # checker only sees the answer itself.
     if state.get("web_searched") and _NOT_FOUND.search(answer):
@@ -493,14 +545,15 @@ def refuse(state: RAGState) -> RAGState:
 @lru_cache
 def get_graph():
     graph = StateGraph(RAGState)
-    for name, node in [("small_talk", small_talk), ("contextualize", contextualize), ("retrieve", retrieve), ("grade", grade),
+    for name, node in [("small_talk", small_talk), ("contextualize", contextualize), ("check_cache", check_cache), ("retrieve", retrieve), ("grade", grade),
                        ("rewrite_query", rewrite_query), ("generate", generate),
                        ("check_grounding", check_grounding), ("web_search", search_web), ("refuse", refuse)]:
         graph.add_node(name, node)
 
     graph.add_conditional_edges(START, route_start)
     graph.add_edge("small_talk", END)
-    graph.add_edge("contextualize", "retrieve")
+    graph.add_edge("contextualize", "check_cache")
+    graph.add_conditional_edges("check_cache", route_after_cache)
     graph.add_conditional_edges("retrieve", route_after_retrieve)
     graph.add_conditional_edges("grade", route_after_grade)
     graph.add_edge("rewrite_query", "retrieve")

@@ -66,7 +66,15 @@ unavailable), while the customer-facing answer uses `GROQ_MODEL`. When the docum
 answer, the agent goes straight to the web tool and doesn't re-grade the allowlisted results
 (`REWRITE_BEFORE_WEB`, `GRADE_WEB_RESULTS` restore the slower, more cautious path). The chat
 calls `/api/chat/stream`, which reports each agent step as it starts, so the UI shows progress
-such as "Searching official websites…" instead of a silent wait.
+such as "Searching official websites…" instead of a silent wait, and streams the answer while it
+is written. The streamed text is shown as a dimmed draft until the grounding check passes; the
+checked answer then replaces it (or a corrected answer or refusal does, if the check fails).
+
+**Answer cache.** After follow-ups are resolved into a standalone question, the agent checks an
+in-memory cache (`check_cache`), so a repeated question is answered instantly with no LLM calls.
+The cache is cleared when documents are uploaded or deleted, entries expire after 6 hours, and an
+answer that gets a 👎 is removed (`ANSWER_CACHE_*`). Each answer shows its response time
+("Answered in 3.4 s", or "(cached)"), with the time per step on hover.
 
 Set `SELF_CORRECTION=false` for the plain
 retrieve-then-generate pipeline (fewer LLM calls), or `GROUNDING_CHECK=false` to skip only the
@@ -275,8 +283,8 @@ citations point at returned sources and at the expected page. Full results are w
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/chat` | none | `{question, session_id?}` → `{answer, sources, outcome, session_id, message_id, notice}` |
-| POST | `/api/chat/stream` | none | Same as `/api/chat` as server-sent events: `{type: "step", step}` per agent step, then `{type: "result", ...}` or `{type: "error", status, detail}` |
+| POST | `/api/chat` | none | `{question, session_id?}` → `{answer, sources, outcome, session_id, message_id, notice, suggestions, cached, latency_ms, timings}` |
+| POST | `/api/chat/stream` | none | Same as `/api/chat` as server-sent events: `{type: "step", step}` per agent step, `{type: "token", text}` while the answer is written (a draft), then `{type: "result", ...}` (final, checked answer) or `{type: "error", status, detail}` |
 | GET | `/api/suggestions` | none | Example questions for the chat screen |
 | POST | `/api/feedback` | none | `{message_id, rating: "up" \| "down", comment?}` |
 | GET | `/api/admin/documents` | `X-Admin-Key` | List indexed documents |

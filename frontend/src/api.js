@@ -35,8 +35,9 @@ export const api = {
 
   suggestions: () => request("/api/suggestions"),
 
-  // Same as chat(), but calls onStep(stepName) as each agent step starts. Resolves to the answer.
-  chatStream: async (question, sessionId, onStep) => {
+  // Same as chat(), but calls onStep(stepName) as each agent step starts and onToken(text) while
+  // the answer is being written (a draft; the resolved result holds the final, checked answer).
+  chatStream: async (question, sessionId, onStep, onToken) => {
     const res = await fetch(`${BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -65,6 +66,7 @@ export const api = {
         buffer = buffer.slice(end + 2);
         const event = JSON.parse(line);
         if (event.type === "step") onStep?.(event.step);
+        else if (event.type === "token") onToken?.(event.text);
         else if (event.type === "result") return event;
         else if (event.type === "error") throw new Error(event.detail || "Request failed");
       }
