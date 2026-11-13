@@ -19,12 +19,12 @@ Masked personal data is reported by type only (for example `"pii_masked": ["AADH
 | `seed` | Sample PDFs indexed at startup | `documents`, `chunks`, `duration_ms` |
 | `document_indexed` / `document_rejected` | Admin upload | `pages`, `chunks`, `size_kb`, `duration_ms` / `reason` |
 
-`outcome` is one of: `answered`, `not_found` (no relevant documents), `unverified` (answer
+`outcome` is one of: `answered`, `answered_web` (answered from the web search tool), `small_talk`, `not_found` (no relevant documents), `unverified` (answer
 failed the grounding check), `needs_account_access`, `financial_advice`, `off_topic`, `unsafe`
 (refused by the grader), `llm_auth_error` (bad Groq key), `llm_rate_limited` (Groq quota),
 `llm_not_configured`, `error` (anything else; see `error_type`).
 
-Agent fields: `decision` (grader verdict), `grade_ms`, `query_rewrites`, `query_rewrite_ms`,
+Agent fields: `small_talk`, `web_searched`, `web_results`, `web_search_ms`, `decision` (grader verdict), `grade_ms`, `query_rewrites`, `query_rewrite_ms`,
 `grounded`, `grounding_ms`, `unsupported_claims`, `regenerations`, and `grader_error` /
 `grounding_error` when an LLM check returned something unusable (the agent then fails open).
 
@@ -52,6 +52,7 @@ Console → **Logging** → **Logs Explorer**. Paste a query and click **Run que
 | Questions with no relevant documents | `jsonPayload.outcome="not_found"` |
 | Questions the grader refused | `jsonPayload.event="chat" AND jsonPayload.decision!="answer"` |
 | Answers that failed the grounding check | `jsonPayload.grounded=false` |
+| Questions where the web search tool was used | `jsonPayload.web_searched=true` |
 | Errors only | `jsonPayload.event="chat" AND severity>=ERROR` |
 | Slow answers (over 5 s) | `jsonPayload.latency_ms>5000` |
 | Messages where an Aadhaar number was masked | `jsonPayload.pii_masked="AADHAAR"` |

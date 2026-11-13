@@ -12,7 +12,7 @@ from app.api.ratelimit import limit_chat
 from app.config import get_settings
 from app.guardrails.pii import mask_pii, privacy_notice
 from app.insights import store
-from app.rag.graph import LLMNotConfiguredError, get_graph
+from app.rag.graph import WEB_LABEL, LLMNotConfiguredError, get_graph
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +27,17 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
-    doc_id: str
-    filename: str
-    page: int
+    doc_id: str  # "web" for web search results
+    filename: str  # page title for web results
+    page: int  # 0 for web results
+    url: str | None = None  # link for web results
 
 
 class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
-    # answered, not_found, needs_account_access, financial_advice, off_topic, unsafe, unverified
+    # answered, answered_web, small_talk, not_found, needs_account_access, financial_advice,
+    # off_topic, unsafe, unverified
     outcome: str
     session_id: str
     # Id for thumbs-up/down feedback on this answer (None if interactions aren't stored).
@@ -90,11 +92,13 @@ def chat(req: ChatRequest) -> ChatResponse:
 
         # Same order and numbering the LLM saw, so citation [n] matches source n in the UI.
         sources = [
-            Source(doc_id=s["doc_id"], filename=s["filename"], page=s["page"])
+            Source(doc_id=s["doc_id"], filename=s["filename"], page=s["page"], url=s.get("url"))
             for s in state.get("sources") or []
         ]
         outcome = state.get("outcome") or ("answered" if sources else "not_found")
         answer = state["answer"]
+        if outcome == "answered_web":
+            answer = WEB_LABEL + answer
         sessions.append_turns(session_id, question.text, answer, settings.max_history_messages)
 
         message_id = None

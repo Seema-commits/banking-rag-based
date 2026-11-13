@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     max_query_rewrites: int = 1  # retries with a reworded search when the chunks don't answer
     max_regenerations: int = 1  # retries when the answer has unsupported claims
 
+    # Web search tool (Tavily): used only when the documents don't answer a banking question,
+    # and only on these official sites. Active when enabled AND a TAVILY_API_KEY is set.
+    web_search_enabled: bool = True
+    tavily_api_key: str = ""
+    web_search_domains: list[str] = ["rbi.org.in", "uidai.gov.in", "incometax.gov.in", "npci.org.in"]
+    web_search_max_results: int = 4
+
     # Server (used by run.py; Cloud Run and similar hosts set PORT for you)
     host: str = "127.0.0.1"
     port: int = 8731

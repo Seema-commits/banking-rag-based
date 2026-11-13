@@ -161,6 +161,28 @@ read -rs -p "Paste the new Groq API key: " KEY && printf '%s' "$KEY" | gcloud se
 gcloud run deploy thistlewood-assistant --source . --region us-central1
 ```
 
+## Optional: turn on the web search tool
+
+The agent can search official websites (rbi.org.in, uidai.gov.in, incometax.gov.in,
+npci.org.in) when the bank's documents don't answer a question. It uses Tavily
+(https://tavily.com, free tier with no card). Create an API key there, then in Cloud Shell:
+
+```bash
+read -rs KEY
+```
+
+Paste the Tavily key (nothing is shown) and press Enter, then:
+
+```bash
+printf %s $KEY | gcloud secrets create tavily-api-key --data-file=- && unset KEY
+SA=$(gcloud projects describe $(gcloud config get-value project) --format=value\(projectNumber\))-compute@developer.gserviceaccount.com
+gcloud secrets add-iam-policy-binding tavily-api-key --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+gcloud run services update thistlewood-assistant --region us-central1 --update-secrets TAVILY_API_KEY=tavily-api-key:latest
+```
+
+To change the allowed sites: `--update-env-vars '^|^WEB_SEARCH_DOMAINS=["rbi.org.in","npci.org.in"]'`.
+To turn it off: `--update-env-vars WEB_SEARCH_ENABLED=false`.
+
 ## Good to know
 
 - **Uploads are temporary.** Cloud Run's disk is wiped when the instance restarts or scales

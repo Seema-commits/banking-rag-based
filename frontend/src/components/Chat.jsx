@@ -119,11 +119,17 @@ export default function Chat() {
               {m.sources?.length > 0 && (
                 <div className="sources">
                   <span>Sources:</span>
-                  {m.sources.map((s, j) => (
-                    <span key={`${s.doc_id}-${s.page}`} className="source">
-                      [{j + 1}] {s.filename}, p. {s.page}
-                    </span>
-                  ))}
+                  {m.sources.map((s, j) =>
+                    s.url ? (
+                      <a key={s.url} className="source" href={s.url} target="_blank" rel="noopener noreferrer">
+                        [{j + 1}] 🌐 {new URL(s.url).hostname}
+                      </a>
+                    ) : (
+                      <span key={`${s.doc_id}-${s.page}`} className="source">
+                        [{j + 1}] {s.filename}, p. {s.page}
+                      </span>
+                    )
+                  )}
                 </div>
               )}
             </div>

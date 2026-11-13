@@ -21,5 +21,8 @@ sentence-transformers>=3.0
 langchain-chroma>=0.1
 chromadb>=0.5
 
+# HTTP client (web search tool)
+httpx>=0.27
+
 # LLM (official Groq SDK)
 groq>=0.30
