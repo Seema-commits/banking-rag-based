@@ -37,6 +37,8 @@ Question ─► PII masking ─► [contextualize] ─► [retrieve] ─┬─ n
                                                                           └─ account data / advice / off-topic / unsafe ─► [refuse] (specific message)
 ```
 
+- **small_talk:** greetings, thanks, goodbyes and "what can you do?" get a short friendly reply
+  with example questions, without a search or an LLM call (`backend/app/rag/smalltalk.py`).
 - **retrieve:** vector search (or hybrid vector + BM25). Chunks below `RELEVANCE_THRESHOLD`
   are dropped, so clearly off-topic questions never reach the LLM. Chunks are grouped by
   (document, page) and numbered once, so citation `[n]` always matches source `n` in the UI.
@@ -266,5 +268,5 @@ citations point at returned sources and at the expected page. Full results are w
 | GET | `/api/health` | none | Health check |
 
 Uploaded files, the Chroma index, the document registry and the interaction database are
-stored in `backend/storage/`. `outcome` is one of `answered`, `not_found`, `unverified`,
+stored in `backend/storage/`. `outcome` is one of `answered`, `small_talk`, `not_found`, `unverified`,
 `needs_account_access`, `financial_advice`, `off_topic` or `unsafe`.
