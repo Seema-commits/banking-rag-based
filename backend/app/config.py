@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     grounding_check: bool = True  # LLM verifies the answer's claims against the sources
     max_query_rewrites: int = 1  # retries with a reworded search when the chunks don't answer
     max_regenerations: int = 1  # retries when the answer has unsupported claims
+    # Reasoning effort for the agent's internal checks on reasoning models (gpt-oss): "low" makes
+    # grading, rewriting and grounding checks much faster. Empty = model default.
+    check_reasoning_effort: str = "low"
 
     # Web search tool (Tavily): used only when the documents don't answer a banking question,
     # and only on these official sites. Active when enabled AND a TAVILY_API_KEY is set.
@@ -74,6 +77,14 @@ class Settings(BaseSettings):
     # PDFs indexed automatically at startup when the knowledge base is empty
     # (the Docker image points this at sample-docs/thistlewood). Empty = off.
     seed_docs_dir: Path | None = None
+
+    # Example questions shown as clickable buttons on the empty chat screen and after a greeting.
+    suggested_questions: list[str] = [
+        "What documents do I need to open an account?",
+        "Can I do Video KYC on a Sunday?",
+        "How often do I need to update my KYC?",
+        "What is the minimum balance for a savings account?",
+    ]
 
     # Abuse protection for the public chat endpoint (0 disables a limit).
     chat_requests_per_minute_per_ip: int = 10

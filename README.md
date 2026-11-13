@@ -38,8 +38,9 @@ Question ─► PII masking ─► [contextualize] ─► [retrieve] ─┬─ n
                                                                           └─ account data / advice / off-topic / unsafe ─► [refuse] (specific message)
 ```
 
-- **small_talk:** greetings, thanks, goodbyes and "what can you do?" get a short friendly reply
-  with example questions, without a search or an LLM call (`backend/app/rag/smalltalk.py`).
+- **small_talk:** greetings, thanks, goodbyes and "what can you do?" get a short friendly reply,
+  without a search or an LLM call (`backend/app/rag/smalltalk.py`). Greetings, and the empty chat
+  screen, show clickable example questions (`SUGGESTED_QUESTIONS`).
 - **retrieve:** vector search (or hybrid vector + BM25). Chunks below `RELEVANCE_THRESHOLD`
   are dropped, so clearly off-topic questions never reach the LLM. Chunks are grouped by
   (document, page) and numbered once, so citation `[n]` always matches source `n` in the UI.
@@ -57,7 +58,9 @@ Question ─► PII masking ─► [contextualize] ─► [retrieve] ─┬─ n
   against the excerpts; unsupported answers are regenerated once, then refused as "unverified".
 
 The agent is in `backend/app/rag/graph.py`, retrieval in `backend/app/rag/retrieval.py`, and
-ingestion in `backend/app/rag/ingestion.py`. Set `SELF_CORRECTION=false` for the plain
+ingestion in `backend/app/rag/ingestion.py`. The agent's internal checks (grading, query
+rewriting, grounding) ask the model for low reasoning effort (`CHECK_REASONING_EFFORT=low`), which
+keeps them fast; the customer-facing answer uses the model's default. Set `SELF_CORRECTION=false` for the plain
 retrieve-then-generate pipeline (fewer LLM calls), or `GROUNDING_CHECK=false` to skip only the
 grounding check.
 
