@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request, status
 
 from app.config import get_settings
+from app import usage
 from app.observability import log_event
 
 logger = logging.getLogger(__name__)
@@ -62,3 +63,4 @@ def limit_chat(request: Request) -> None:
         if per_minute > 0:
             _per_ip[ip].append(now)
         _day["count"] += 1
+    usage.add("questions")  # warns the owner at 80% / 100% of the daily cap
