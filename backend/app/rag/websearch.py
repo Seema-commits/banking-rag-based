@@ -14,7 +14,9 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app import usage
 from app.config import get_settings
+from app.observability import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,23 @@ def _allowed(url: str, domains: list[str]) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
 
+def failure_reason(exc: Exception) -> str:
+    """auth (bad or missing key), quota (credits or rate limit), timeout, network, http_<code>,
+    or bad_response, so the owner alert can say what to fix."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return "auth"
+        if code in (402, 429, 432, 433):  # Tavily uses 432/433 for plan and usage limits
+            return "quota"
+        return f"http_{code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.TransportError):
+        return "network"
+    return "bad_response"
+
+
 def web_search(query: str) -> list[WebResult]:
     """Search the allowlisted sites. Returns [] on any error, so the bot falls back to "not found"."""
     settings = get_settings()
@@ -60,8 +79,14 @@ def web_search(query: str) -> list[WebResult]:
         response.raise_for_status()
         items = response.json().get("results") or []
     except Exception as exc:  # network error, bad key, quota, unexpected JSON
-        logger.warning("Web search failed: %s", type(exc).__name__)
+        reason = failure_reason(exc)
+        log_event(logger, "web_search_failed",
+                  level=logging.ERROR if reason in ("auth", "quota") else logging.WARNING,
+                  reason=reason, error_type=type(exc).__name__,
+                  status=getattr(getattr(exc, "response", None), "status_code", None))
         return []
+    finally:
+        usage.add("web_searches")
 
     results = []
     for item in items:

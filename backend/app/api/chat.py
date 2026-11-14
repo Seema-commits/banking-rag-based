@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import observability as obs
+from app import usage
 from app.api import sessions
 from app.api.ratelimit import limit_chat
 from app.config import get_settings
@@ -170,6 +171,7 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
     finally:
         # One structured line per request. No question or answer text, only numbers and flags.
         tokens = metrics.get("prompt_tokens", 0) + metrics.get("completion_tokens", 0)
+        usage.add("llm_tokens", tokens)
         obs.log_event(
             logger,
             "chat",

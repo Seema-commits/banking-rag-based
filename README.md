@@ -175,6 +175,12 @@ for a step-by-step Google Cloud Run guide.
 
 **Observability:** every chat request writes one structured JSON log line (outcome, latency per
 pipeline step, retrieval scores, Groq token usage, PII-masking flags; never question text).
+**Owner alerts:** one command (`python3 ops/alerts/setup_alerts.py --email you@example.com`)
+creates email alerts for a rejected Groq key, Groq rate limits, chat errors, web search failures,
+slow answers and daily usage near its limit, and checks the budget alert. The app counts daily
+questions, Groq tokens and Tavily searches itself, because Google Cloud's budget can't see those
+providers. See [docs/alerts.md](docs/alerts.md) for what each email means and what to do.
+
 [docs/observability.md](docs/observability.md) shows how to query the logs and create
 log-based metrics, a Cloud Monitoring dashboard and an error alert from `ops/monitoring/`.
 

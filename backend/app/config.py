@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     chat_requests_per_minute_per_ip: int = 10
     chat_requests_per_day: int = 500  # across all users, protects the Groq quota
 
+    # Owner alerts: daily usage that triggers a warning (80% and 100%), for providers whose
+    # billing Google Cloud can't see. Set them to your Groq / Tavily plan limits. 0 = off.
+    daily_llm_token_warning: int = 300_000
+    daily_web_search_warning: int = 30  # Tavily free tier: ~1,000 searches a month
+
     # Security / API
     admin_api_key: str = ""
     # Extra allowed frontend origins, e.g. a deployed site. Any localhost port is always allowed.
