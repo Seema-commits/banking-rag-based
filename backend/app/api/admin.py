@@ -12,7 +12,7 @@ from app.api.deps import require_admin
 from app.config import get_settings
 from app.insights import store
 from app.observability import log_event
-from app.rag import registry
+from app.rag import doc_storage, registry
 from app.rag.ingestion import IngestionError, delete_document, ingest_pdf
 from app.rag.registry import DocumentRecord
 
@@ -77,6 +77,12 @@ def upload_documents(files: list[UploadFile] = File(...)) -> UploadResult:
         try:
             _save_upload(file, dest, max_bytes)
             record = ingest_pdf(dest, doc_id, filename)
+            if doc_storage.enabled():
+                try:
+                    doc_storage.save(doc_id, dest, filename)  # keep it across restarts
+                except Exception:
+                    delete_document(record)  # don't keep a document that would vanish on restart
+                    raise IngestionError("Could not save the file to permanent storage. Please try again.")
             result.uploaded.append(record)
             log_event(logger, "document_indexed", pages=record.pages, chunks=record.chunks,
                       size_kb=round(dest.stat().st_size / 1024),
@@ -97,6 +103,8 @@ def remove_document(doc_id: str) -> None:
     record = registry.get_document(doc_id)
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    if doc_storage.enabled():
+        doc_storage.delete(doc_id)
     delete_document(record)
 
 

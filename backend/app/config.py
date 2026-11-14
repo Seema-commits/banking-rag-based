@@ -27,9 +27,19 @@ class Settings(BaseSettings):
     # Ingestion
     upload_dir: Path = BASE_DIR / "storage" / "uploads"
     registry_path: Path = BASE_DIR / "storage" / "documents.json"
-    # Question/answer log and feedback for the admin Insights tab (questions are PII-masked).
+    # Audit log of questions (PII-masked), answers and feedback, for the admin Insights tab.
     store_interactions: bool = True
+    # "sqlite" (local file below; wiped on Cloud Run restarts) or "firestore" (permanent).
+    storage_backend: str = "sqlite"
     interactions_db: Path = BASE_DIR / "storage" / "interactions.db"
+    firestore_project: str = ""  # empty = the project the app runs in
+    firestore_database: str = "(default)"
+    firestore_collection: str = "interactions"
+    interaction_retention_days: int = 90  # records are deleted after this; 0 = keep forever
+
+    # Cloud Storage bucket where uploaded PDFs are kept, so they survive restarts. On startup
+    # every PDF in the bucket is re-indexed. Empty = keep uploads only on the local disk.
+    documents_bucket: str = ""
     chunk_size: int = 1000
     chunk_overlap: int = 200
     # Drop lines that repeat on most pages of a PDF (headers, footers, "Page N") before chunking,
