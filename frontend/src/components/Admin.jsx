@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
-import Insights from "./Insights.jsx";
+import Monitoring from "./Monitoring.jsx";
 
 const KEY_STORAGE = "ragbased.adminKey";
 
@@ -18,6 +18,7 @@ export default function Admin() {
   const [keyInput, setKeyInput] = useState("");
   const [docs, setDocs] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState("documents"); // documents | monitoring
   const [status, setStatus] = useState(null); // { type: "ok" | "error", text }
   const fileRef = useRef(null);
 
@@ -132,12 +133,21 @@ export default function Admin() {
 
   return (
     <section className="admin">
+      <div className="admin-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "documents"} className={tab === "documents" ? "tab active" : "tab"}
+          onClick={() => setTab("documents")}>Documents</button>
+        <button role="tab" aria-selected={tab === "monitoring"} className={tab === "monitoring" ? "tab active" : "tab"}
+          onClick={() => setTab("monitoring")}>Monitoring</button>
+        <button className="link signout" onClick={logout}>Sign out</button>
+      </div>
+
+      {tab === "monitoring" ? (
+        <Monitoring adminKey={adminKey} onUploadRequested={() => setTab("documents")} />
+      ) : (
+      <>
       <div className="card">
         <div className="card-head">
           <h2>Upload documents</h2>
-          <button className="link" onClick={logout}>
-            Sign out
-          </button>
         </div>
         <form className="upload" onSubmit={upload}>
           <input ref={fileRef} type="file" accept="application/pdf,.pdf" multiple />
@@ -184,7 +194,8 @@ export default function Admin() {
         )}
       </div>
 
-      <Insights adminKey={adminKey} />
+      </>
+      )}
     </section>
   );
 }
