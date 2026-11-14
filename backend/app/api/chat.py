@@ -102,6 +102,23 @@ def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:
     }
 
 
+def _store_failure(settings, session_id, question, outcome, metrics, history, started) -> None:
+    """Failed requests go into the audit log too, so the owner's Monitoring tab can show them."""
+    if not settings.store_interactions:
+        return
+    try:
+        details = _audit_details(metrics, history, question.found)
+        if "error_type" in metrics:
+            details["error_type"] = metrics["error_type"]
+        store.record_interaction(
+            session_id=session_id, question=question.text, answer="", outcome=outcome, sources=[],
+            top_score=metrics.get("top_score"), latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            details=details,
+        )
+    except Exception:
+        logger.exception("Could not store the failed interaction")
+
+
 def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
              on_token: Callable[[str], None] | None = None) -> ChatResponse:
     """Answer one question. Raises HTTPException with a user-facing message on failure.
@@ -189,6 +206,8 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
             timings={k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
         )
     finally:
+        if outcome == "error" or outcome.startswith("llm_"):
+            _store_failure(settings, session_id, question, outcome, metrics, history, started)
         # One structured line per request. No question or answer text, only numbers and flags.
         tokens = metrics.get("prompt_tokens", 0) + metrics.get("completion_tokens", 0)
         usage.add("llm_tokens", tokens)

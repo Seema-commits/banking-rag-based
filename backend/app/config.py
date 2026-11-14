@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     daily_llm_token_warning: int = 300_000
     daily_web_search_warning: int = 30  # Tavily free tier: ~1,000 searches a month
 
+    # Monitoring tab: answers slower than this are listed as slow; optional token prices (USD per
+    # million tokens, from your Groq plan) to estimate LLM cost. 0 = don't estimate.
+    slow_answer_ms: int = 10_000
+    llm_cost_per_million_input_tokens: float = 0.0
+    llm_cost_per_million_output_tokens: float = 0.0
+
     # Security / API
     admin_api_key: str = ""
     # Extra allowed frontend origins, e.g. a deployed site. Any localhost port is always allowed.

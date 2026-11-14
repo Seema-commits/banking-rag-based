@@ -154,6 +154,17 @@ To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and se
 
 Run the tests from `backend/` with `pip install pytest` and `python -m pytest`.
 
+## Monitoring dashboard
+
+**Admin → Monitoring** shows the owner, for the last 24 hours / 7 / 30 days: health tiles
+(answer rate, errors, typical and slowest-5% response time, cache hits, 👍/👎, tokens), today's
+usage against the alert limits, **suggested actions** (for example "the Groq key is being
+rejected", "web search is the slowest step", "7 questions the documents couldn't answer" with an
+Upload button), charts of questions by outcome, response time and **where the time goes** per
+agent step, problem lists, and a detail view with the full audit trail of any question. It can
+clear the answer cache, export eval candidates and download the audit log as CSV. See
+[docs/monitoring.md](docs/monitoring.md).
+
 ## Feedback and Insights
 
 Every answer has 👍/👎 buttons (👎 asks for an optional comment, which is PII-masked). Each

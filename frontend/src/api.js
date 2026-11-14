@@ -83,6 +83,21 @@ export const api = {
 
   insights: (adminKey) => request("/api/admin/insights", { adminKey }),
 
+  monitoring: (adminKey, hours) => request(`/api/admin/monitoring?hours=${hours}`, { adminKey }),
+
+  interaction: (adminKey, id) => request(`/api/admin/interactions/${encodeURIComponent(id)}`, { adminKey }),
+
+  clearCache: (adminKey) => request("/api/admin/cache/clear", { method: "POST", adminKey }),
+
+  // Downloads a text file from an admin endpoint (CSV / JSONL).
+  download: async (adminKey, path, filename) => {
+    const res = await fetch(`${BASE}${path}`, { headers: { "X-Admin-Key": adminKey } });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    Object.assign(document.createElement("a"), { href: url, download: filename }).click();
+    URL.revokeObjectURL(url);
+  },
+
   // Returns the JSONL text of unanswered/downvoted questions for the eval set.
   evalCandidates: async (adminKey) => {
     const res = await fetch(`${BASE}/api/admin/insights/eval-candidates`, {
