@@ -17,6 +17,7 @@ the simple pipeline contextualize -> retrieve -> generate.
 """
 
 import contextvars
+import hashlib
 import json
 import logging
 import re
@@ -299,6 +300,19 @@ REFUSALS = {
     ),
 }
 _DECISIONS = {"answer", "not_in_documents", "needs_account_access", "financial_advice", "off_topic", "unsafe"}
+
+# Short fingerprint of every prompt the agent uses. Stored with each answer in the audit log, so
+# it's clear which prompt wording produced it; changes whenever any prompt changes.
+PROMPT_VERSION = hashlib.sha256("\x00".join([
+    CONTEXTUALIZE_PROMPT, ANSWER_PROMPT, GRADE_PROMPT, SEARCH_REWRITE_PROMPT, GROUNDING_PROMPT,
+    REGENERATE_NOTE, WEB_NOTE, NO_CONTEXT_ANSWER, *REFUSALS.values(),
+]).encode()).hexdigest()[:10]
+
+
+def active_check_model() -> str:
+    """The model the agent's checks are using right now (after any fallback)."""
+    settings = get_settings()
+    return settings.groq_model if _check_model_failed or not settings.check_model else settings.check_model
 
 
 def route_start(state: RAGState) -> Literal["small_talk", "contextualize"]:

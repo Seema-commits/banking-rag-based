@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api import admin, chat
 from app.config import get_settings
 from app.observability import configure_logging, log_event
-from app.rag import registry
+from app.rag import doc_storage, registry
 from app.rag.ingestion import ingest_pdf
 from app.rag.vectorstore import get_vectorstore
 
@@ -21,24 +21,57 @@ configure_logging(get_settings().log_format)
 logger = logging.getLogger(__name__)
 
 
-def seed_documents() -> None:
-    """Index the PDFs in SEED_DOCS_DIR when the knowledge base is empty.
+def restore_saved_documents() -> None:
+    """Re-index PDFs kept in Cloud Storage (DOCUMENTS_BUCKET) that aren't indexed yet.
 
-    Cloud Run's disk is wiped on every restart, so the demo documents are re-indexed
-    each time a new instance starts. Documents uploaded later from the Admin page
-    last until the next restart.
+    Cloud Run's disk is wiped on restart; the PDFs in the bucket are the permanent copy.
+    """
+    if not doc_storage.enabled():
+        return
+    settings = get_settings()
+    start = time.perf_counter()
+    indexed = {d.id for d in registry.list_documents()}
+    try:
+        saved = doc_storage.list_saved()
+    except Exception:
+        logger.exception("Could not list saved documents in %s", settings.documents_bucket)
+        return
+    restored = chunks = 0
+    for doc in saved:
+        if doc.doc_id in indexed:
+            continue
+        dest = settings.upload_dir / f"{doc.doc_id}.pdf"
+        try:
+            doc_storage.download(doc.doc_id, dest)
+            record = ingest_pdf(dest, doc.doc_id, doc.filename, uploaded_at=doc.uploaded_at)
+            restored, chunks = restored + 1, chunks + record.chunks
+        except Exception:
+            dest.unlink(missing_ok=True)
+            logger.exception("Failed to restore %s", doc.filename)
+    log_event(logger, "documents_restored", documents=restored, chunks=chunks, saved=len(saved),
+              duration_ms=round((time.perf_counter() - start) * 1000))
+
+
+def seed_documents() -> None:
+    """Index the sample PDFs in SEED_DOCS_DIR that aren't indexed yet (matched by filename).
+
+    Cloud Run's disk is wiped on every restart, so the demo documents are re-indexed each time a
+    new instance starts. Admin uploads are kept separately (see restore_saved_documents).
     """
     settings = get_settings()
     folder = settings.seed_docs_dir
-    if not folder or registry.list_documents():
+    if not folder:
         return
     pdfs = sorted(folder.glob("*.pdf")) if folder.is_dir() else []
     if not pdfs:
         logger.warning("SEED_DOCS_DIR %s has no PDFs", folder)
         return
+    present = {d.filename for d in registry.list_documents()}
     start = time.perf_counter()
     seeded = chunks = 0
     for pdf in pdfs:
+        if pdf.name in present:
+            continue
         doc_id = uuid.uuid4().hex
         dest = settings.upload_dir / f"{doc_id}.pdf"
         shutil.copy(pdf, dest)
@@ -49,8 +82,9 @@ def seed_documents() -> None:
         except Exception:
             dest.unlink(missing_ok=True)
             logger.exception("Failed to seed %s", pdf.name)
-    log_event(logger, "seed", documents=seeded, chunks=chunks,
-              duration_ms=round((time.perf_counter() - start) * 1000))
+    if seeded:
+        log_event(logger, "seed", documents=seeded, chunks=chunks,
+                  duration_ms=round((time.perf_counter() - start) * 1000))
 
 
 @asynccontextmanager
@@ -66,11 +100,13 @@ async def lifespan(app: FastAPI):
     logger.info("Loading embedding model %s ...", settings.embedding_model)
     start = time.perf_counter()
     await run_in_threadpool(get_vectorstore)
+    await run_in_threadpool(restore_saved_documents)
     await run_in_threadpool(seed_documents)
     log_event(logger, "startup", duration_ms=round((time.perf_counter() - start) * 1000),
               embedding_model=settings.embedding_model, llm_model=settings.groq_model,
               top_k=settings.top_k, relevance_threshold=settings.relevance_threshold,
-              documents=len(registry.list_documents()))
+              documents=len(registry.list_documents()), storage=settings.storage_backend,
+              documents_bucket=bool(settings.documents_bucket))
     logger.info("Ready")
     yield
 

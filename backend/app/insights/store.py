@@ -1,114 +1,251 @@
-"""Interaction log and feedback (SQLite) for the admin Insights tab.
+"""Interaction (audit) log and feedback, for the admin Insights tab and later review.
 
-Stores each question (already PII-masked), the answer, outcome, sources and timings, plus any
-thumbs-up/down feedback. Used to find unanswered questions and knowledge gaps, and to export
-failures as candidates for the eval set. Keeps the most recent MAX_ROWS interactions.
+One record per question: when it was asked, the PII-masked question, the exact answer shown, its
+sources and outcome, the agent's decisions, time per step, tokens, the model and prompt version
+that produced it, and any thumbs-up/down feedback. Used to find knowledge gaps, review answers,
+and export failures as eval candidates.
 
-On Cloud Run the disk is wiped on restart, so this history is temporary there.
+Two backends, chosen by STORAGE_BACKEND:
+  - "sqlite"    (default): a local file (INTERACTIONS_DB). Fine for development; on Cloud Run the
+                disk is wiped on restart.
+  - "firestore": Google Cloud Firestore, which keeps records permanently. Records carry an
+                `expire_at` field; a Firestore TTL policy deletes them after
+                INTERACTION_RETENTION_DAYS (see ops/storage/setup_storage.sh).
+
+Insights are computed in Python over the most recent INSIGHTS_WINDOW records, which keeps the
+queries simple and cheap on both backends at demo scale.
 """
 
 import json
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from app.config import get_settings
 
-MAX_ROWS = 5000
-_lock = threading.Lock()
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS interactions (
-    id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL,
-    session_id TEXT,
-    question TEXT NOT NULL,
-    answer TEXT NOT NULL,
-    outcome TEXT NOT NULL,
-    sources TEXT NOT NULL,
-    top_score REAL,
-    latency_ms REAL,
-    rating TEXT,
-    comment TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_interactions_created ON interactions(created_at);
-"""
+INSIGHTS_WINDOW = 2000
+_SQLITE_MAX_ROWS = 5000
+_CORE = ("id", "created_at", "session_id", "question", "answer", "outcome", "sources", "top_score",
+         "latency_ms", "rating", "comment")
 
 
-def _connect() -> sqlite3.Connection:
-    path = get_settings().interactions_db
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
-    return conn
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def record_interaction(*, session_id: str, question: str, answer: str, outcome: str,
-                       sources: list[dict], top_score: float | None, latency_ms: float) -> str:
+# ---------------------------------------------------------------------------- SQLite backend
+
+class SQLiteBackend:
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS interactions (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        session_id TEXT,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        sources TEXT NOT NULL,
+        top_score REAL,
+        latency_ms REAL,
+        rating TEXT,
+        comment TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_interactions_created ON interactions(created_at);
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+
+    def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.executescript(self._SCHEMA)
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(interactions)")}
+        if "details" not in columns:  # databases created before the audit fields existed
+            conn.execute("ALTER TABLE interactions ADD COLUMN details TEXT")
+        return conn
+
+    def add(self, record: dict) -> None:
+        details = {k: v for k, v in record.items() if k not in _CORE}
+        retention = get_settings().interaction_retention_days
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO interactions (id, created_at, session_id, question, answer, outcome, sources,"
+                " top_score, latency_ms, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record["id"], record["created_at"].isoformat(), record.get("session_id"), record["question"],
+                 record["answer"], record["outcome"], json.dumps(record.get("sources") or []),
+                 record.get("top_score"), record.get("latency_ms"), json.dumps(details, default=str)),
+            )
+            if retention > 0:
+                cutoff = (_now() - timedelta(days=retention)).isoformat()
+                conn.execute("DELETE FROM interactions WHERE created_at < ?", (cutoff,))
+            conn.execute("DELETE FROM interactions WHERE id NOT IN "
+                         "(SELECT id FROM interactions ORDER BY created_at DESC LIMIT ?)", (_SQLITE_MAX_ROWS,))
+
+    def set_feedback(self, message_id: str, rating: str, comment: str | None) -> bool:
+        with self.lock, self._connect() as conn:
+            row = conn.execute("SELECT details FROM interactions WHERE id = ?", (message_id,)).fetchone()
+            if row is None:
+                return False
+            details = json.loads(row["details"] or "{}")
+            details["feedback_at"] = _now().isoformat()
+            conn.execute("UPDATE interactions SET rating = ?, comment = ?, details = ? WHERE id = ?",
+                         (rating, comment, json.dumps(details), message_id))
+            return True
+
+    def recent(self, limit: int, since: datetime | None = None) -> list[dict]:
+        query = "SELECT * FROM interactions"
+        params: list = []
+        if since is not None:
+            query += " WHERE created_at >= ?"
+            params.append(since.isoformat())
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.lock, self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        records = []
+        for r in rows:
+            record = {k: r[k] for k in _CORE}
+            record["sources"] = json.loads(r["sources"] or "[]")
+            record.update(json.loads(r["details"] or "{}"))
+            records.append(record)
+        return records
+
+
+# ------------------------------------------------------------------------- Firestore backend
+
+class FirestoreBackend:
+    def __init__(self, project: str | None, database: str, collection: str):
+        from google.cloud import firestore  # imported here: only needed on Cloud Run
+
+        self.firestore = firestore
+        self.collection = firestore.Client(project=project or None, database=database).collection(collection)
+
+    def add(self, record: dict) -> None:
+        retention = get_settings().interaction_retention_days
+        doc = {k: v for k, v in record.items() if k != "id"}
+        if retention > 0:
+            doc["expire_at"] = record["created_at"] + timedelta(days=retention)
+        self.collection.document(record["id"]).set(doc)
+
+    def set_feedback(self, message_id: str, rating: str, comment: str | None) -> bool:
+        ref = self.collection.document(message_id)
+        if not ref.get().exists:
+            return False
+        ref.update({"rating": rating, "comment": comment, "feedback_at": _now()})
+        return True
+
+    def recent(self, limit: int, since: datetime | None = None) -> list[dict]:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        query = self.collection
+        if since is not None:
+            query = query.where(filter=FieldFilter("created_at", ">=", since))
+        query = query.order_by("created_at", direction=self.firestore.Query.DESCENDING).limit(limit)
+        records = []
+        for snap in query.stream():
+            record = {"id": snap.id, **snap.to_dict()}
+            for key in ("created_at", "expire_at", "feedback_at"):
+                if isinstance(record.get(key), datetime):
+                    record[key] = record[key].isoformat()
+            records.append(record)
+        return records
+
+
+@lru_cache
+def get_backend():
+    settings = get_settings()
+    if settings.storage_backend == "firestore":
+        return FirestoreBackend(settings.firestore_project, settings.firestore_database,
+                                settings.firestore_collection)
+    return SQLiteBackend(settings.interactions_db)
+
+
+# ------------------------------------------------------------------------------- public API
+
+def record_interaction(*, session_id: str, question: str, answer: str, outcome: str, sources: list[dict],
+                       top_score: float | None, latency_ms: float, details: dict | None = None) -> str:
+    """Store one question and answer; returns its message id (used for feedback)."""
     message_id = uuid.uuid4().hex
-    with _lock, _connect() as conn:
-        conn.execute(
-            "INSERT INTO interactions (id, created_at, session_id, question, answer, outcome, sources,"
-            " top_score, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (message_id, datetime.now(timezone.utc).isoformat(), session_id, question, answer, outcome,
-             json.dumps(sources), top_score, latency_ms),
-        )
-        conn.execute(
-            "DELETE FROM interactions WHERE id NOT IN "
-            "(SELECT id FROM interactions ORDER BY created_at DESC LIMIT ?)", (MAX_ROWS,)
-        )
+    get_backend().add({
+        "id": message_id, "created_at": _now(), "session_id": session_id, "question": question,
+        "answer": answer, "outcome": outcome, "sources": sources, "top_score": top_score,
+        "latency_ms": latency_ms, "rating": None, "comment": None, **(details or {}),
+    })
     return message_id
 
 
 def set_feedback(message_id: str, rating: str, comment: str | None) -> bool:
-    with _lock, _connect() as conn:
-        cur = conn.execute("UPDATE interactions SET rating = ?, comment = ? WHERE id = ?",
-                           (rating, comment, message_id))
-        return cur.rowcount > 0
+    return get_backend().set_feedback(message_id, rating, comment)
+
+
+def recent(limit: int = INSIGHTS_WINDOW, since: datetime | None = None) -> list[dict]:
+    """Most recent interactions, newest first."""
+    return get_backend().recent(limit, since)
+
+
+def _normalise(question: str) -> str:
+    return " ".join(question.lower().split())
+
+
+def _unanswered(records: list[dict]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for r in records:
+        if r["outcome"] not in ("not_found", "unverified"):
+            continue
+        g = groups.setdefault(_normalise(r["question"]), {
+            "question": _normalise(r["question"]), "count": 0, "last_seen": r["created_at"], "outcomes": set()})
+        g["count"] += 1
+        g["last_seen"] = max(g["last_seen"], r["created_at"])
+        g["outcomes"].add(r["outcome"])
+    # Most frequently asked first; ties broken by the most recent.
+    rows = sorted(groups.values(), key=lambda g: (g["count"], g["last_seen"]), reverse=True)
+    return [{**g, "outcomes": ",".join(sorted(g["outcomes"]))} for g in rows]
 
 
 def insights(limit: int = 20) -> dict:
-    with _lock, _connect() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM interactions").fetchone()[0]
-        by_outcome = {r["outcome"]: r["n"] for r in conn.execute(
-            "SELECT outcome, COUNT(*) AS n FROM interactions GROUP BY outcome ORDER BY n DESC")}
-        ratings = {r["rating"]: r["n"] for r in conn.execute(
-            "SELECT rating, COUNT(*) AS n FROM interactions WHERE rating IS NOT NULL GROUP BY rating")}
-        avg_latency = conn.execute("SELECT AVG(latency_ms) FROM interactions").fetchone()[0]
-        unanswered = [dict(r) for r in conn.execute(
-            "SELECT LOWER(TRIM(question)) AS question, COUNT(*) AS count, MAX(created_at) AS last_seen,"
-            " GROUP_CONCAT(DISTINCT outcome) AS outcomes FROM interactions"
-            " WHERE outcome IN ('not_found', 'unverified') GROUP BY LOWER(TRIM(question))"
-            " ORDER BY count DESC, last_seen DESC LIMIT ?", (limit,))]
-        downvoted = [dict(r) for r in conn.execute(
-            "SELECT id, created_at, question, answer, outcome, comment FROM interactions"
-            " WHERE rating = 'down' ORDER BY created_at DESC LIMIT ?", (limit,))]
-    answered = by_outcome.get("answered", 0)
+    """Usage, answer rate, feedback, knowledge gaps and downvoted answers (recent window)."""
+    records = recent()
+    total = len(records)
+    by_outcome: dict[str, int] = {}
+    for r in records:
+        by_outcome[r["outcome"]] = by_outcome.get(r["outcome"], 0) + 1
+    latencies = [r["latency_ms"] for r in records if r.get("latency_ms") is not None]
+    downvoted = [{k: r.get(k) for k in ("id", "created_at", "question", "answer", "outcome", "comment")}
+                 for r in records if r.get("rating") == "down"][:limit]
     return {
         "total": total,
-        "answer_rate": answered / total if total else None,
-        "by_outcome": by_outcome,
-        "feedback": {"up": ratings.get("up", 0), "down": ratings.get("down", 0)},
-        "avg_latency_ms": round(avg_latency) if avg_latency else None,
-        "unanswered": unanswered,
+        "window": INSIGHTS_WINDOW,
+        "answer_rate": by_outcome.get("answered", 0) / total if total else None,
+        "by_outcome": dict(sorted(by_outcome.items(), key=lambda kv: -kv[1])),
+        "feedback": {"up": sum(r.get("rating") == "up" for r in records),
+                     "down": sum(r.get("rating") == "down" for r in records)},
+        "avg_latency_ms": round(sum(latencies) / len(latencies)) if latencies else None,
+        "unanswered": _unanswered(records)[:limit],
         "downvoted": downvoted,
+        "storage": get_settings().storage_backend,
     }
 
 
 def eval_candidates() -> list[dict]:
     """Unanswered and downvoted questions, in the eval file's format, for a human to label."""
-    with _lock, _connect() as conn:
-        rows = conn.execute(
-            "SELECT LOWER(TRIM(question)) AS question, MAX(outcome) AS outcome, MAX(rating) AS rating,"
-            " COUNT(*) AS count FROM interactions WHERE outcome IN ('not_found', 'unverified')"
-            " OR rating = 'down' GROUP BY LOWER(TRIM(question)) ORDER BY count DESC"
-        ).fetchall()
+    records = recent()
+    groups: dict[str, dict] = {}
+    for r in records:
+        if r["outcome"] in ("not_found", "unverified") or r.get("rating") == "down":
+            g = groups.setdefault(_normalise(r["question"]), {
+                "question": _normalise(r["question"]), "seen_outcome": r["outcome"], "rating": None, "count": 0})
+            g["count"] += 1
+            g["rating"] = g["rating"] or r.get("rating")
+    rows = sorted(groups.values(), key=lambda g: -g["count"])
     return [
-        {"id": f"review-{i:03d}", "type": "needs_review", "question": r["question"],
-         "seen_outcome": r["outcome"], "rating": r["rating"], "times_asked": r["count"],
+        {"id": f"review-{i:03d}", "type": "needs_review", "question": g["question"],
+         "seen_outcome": g["seen_outcome"], "rating": g["rating"], "times_asked": g["count"],
          "note": "Set type to in_scope (add sources and answer_keywords) or out_of_scope, "
                  "then add to eval/questions.jsonl"}
-        for i, r in enumerate(rows, start=1)
+        for i, g in enumerate(rows, start=1)
     ]

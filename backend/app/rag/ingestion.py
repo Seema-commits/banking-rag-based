@@ -58,7 +58,7 @@ def _chunk_ids(doc_id: str, count: int) -> list[str]:
     return [f"{doc_id}-{i}" for i in range(count)]
 
 
-def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
+def ingest_pdf(path: Path, doc_id: str, filename: str, uploaded_at: str | None = None) -> DocumentRecord:
     settings = get_settings()
 
     try:
@@ -101,7 +101,7 @@ def ingest_pdf(path: Path, doc_id: str, filename: str) -> DocumentRecord:
         filename=filename,
         pages=len(pages),
         chunks=len(chunks),
-        uploaded_at=DocumentRecord.now(),
+        uploaded_at=uploaded_at or DocumentRecord.now(),
     )
 
     store = get_vectorstore()

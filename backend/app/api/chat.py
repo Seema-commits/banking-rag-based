@@ -20,7 +20,8 @@ from app.config import get_settings
 from app.guardrails.pii import mask_pii, privacy_notice
 from app.insights import store
 from app.rag import answer_cache
-from app.rag.graph import WEB_LABEL, LLMNotConfiguredError, get_graph, set_token_sink
+from app.rag.graph import (PROMPT_VERSION, WEB_LABEL, LLMNotConfiguredError, active_check_model,
+                           get_graph, set_token_sink)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,24 @@ def _run_graph(inputs: dict, on_step: Callable[[str], None] | None) -> dict:
 # Outcomes worth caching: real answers and deliberate refusals, not errors or small talk.
 _CACHEABLE = {"answered", "answered_web", "not_found", "needs_account_access", "financial_advice",
               "off_topic", "unsafe"}
+
+
+def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:
+    """What produced this answer, for the audit log: no personal data, only settings and numbers."""
+    settings = get_settings()
+    return {
+        "llm_model": settings.groq_model,
+        "check_model": active_check_model(),
+        "prompt_version": PROMPT_VERSION,
+        "retrieval_mode": settings.retrieval_mode,
+        "relevance_threshold": settings.relevance_threshold,
+        "history_messages": len(history),
+        "pii_masked": sorted(set(pii_found)),
+        "tokens": {k: metrics.get(k, 0) for k in ("prompt_tokens", "completion_tokens")},
+        "timings_ms": {k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
+        **{k: metrics[k] for k in ("decision", "grounded", "regenerations", "query_rewrites", "web_searched",
+                                   "web_results", "cached", "small_talk", "rewritten") if k in metrics},
+    }
 
 
 def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
@@ -154,6 +173,7 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
                     session_id=session_id, question=question.text, answer=answer, outcome=outcome,
                     sources=[s.model_dump() for s in sources], top_score=metrics.get("top_score"),
                     latency_ms=round((time.perf_counter() - started) * 1000, 1),
+                    details=_audit_details(metrics, history, question.found),
                 )
             except Exception:
                 logger.exception("Could not store the interaction")  # never fail the answer for it

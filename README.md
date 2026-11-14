@@ -165,7 +165,11 @@ outcomes, **knowledge gaps** (questions the documents couldn't answer, most freq
 downvoted answers. **Export eval candidates** downloads those failures as JSON lines in the
 eval format, to label and add to `eval/questions.jsonl`, so every real failure becomes a test.
 
-On Cloud Run the disk is wiped on restart, so this history is temporary there.
+**Permanent storage:** on Cloud Run, `bash ops/storage/setup_storage.sh` moves this history into
+**Firestore** as an audit log (question, answer, sources, the agent's decisions, time per step,
+tokens, model and prompt version, feedback; deleted after 90 days), and keeps uploaded PDFs in a
+private **Cloud Storage** bucket that is re-indexed on every start. See
+[docs/storage.md](docs/storage.md).
 
 ## Deployment
 

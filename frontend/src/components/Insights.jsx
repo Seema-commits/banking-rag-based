@@ -60,6 +60,11 @@ export default function Insights({ adminKey }) {
         <p className="muted">No questions yet. Insights appear after people use the chat.</p>
       ) : (
         <>
+          <p className={data.storage === "firestore" ? "muted" : "status error"}>
+            {data.storage === "firestore"
+              ? `History: permanent (Firestore), last ${data.total} of up to ${data.window} questions.`
+              : "History: temporary (local file). On Cloud Run it resets when the app restarts; see docs/storage.md."}
+          </p>
           <div className="stats">
             <div className="stat"><b>{data.total}</b><span>questions</span></div>
             <div className="stat"><b>{pct(data.answer_rate)}</b><span>answered</span></div>
