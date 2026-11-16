@@ -207,7 +207,7 @@ account opening and KYC, Video KYC, re-KYC and updating details, and fees and su
 Markdown files next to them are the sources; rebuild the PDFs with
 `pip install reportlab` and `python scripts/build_sample_pdfs.py`.
 
-Upload them from the Admin tab to try the chatbot. You can also add the RBI Master Direction
+Upload them from the admin page (open the site with `/#admin` at the end; the public chat has no Admin button) to try the chatbot. You can also add the RBI Master Direction
 on KYC (download it from rbi.org.in, and keep `rbi` in the filename so the eval finds it).
 
 > Thistlewood Bank is fictional. This is a portfolio demo, not affiliated with any bank or
@@ -277,10 +277,13 @@ $env:SELF_CORRECTION="false"; python eval\run_eval.py --llm; Remove-Item Env:SEL
 
 ## Evaluation
 
-`eval/questions.jsonl` has 37 questions answered by the sample documents (each tagged with the
+`eval/questions.jsonl` has 40 questions answered by the sample documents (each tagged with the
 file and page that holds the answer), 9 questions the bot should refuse (including tricky ones
 such as "What is the home loan interest rate at Thistlewood Bank?"), and 4 optional questions
-that need the RBI document.
+that need the RBI document. The Results tables above were measured on the first 37; the three
+`kyc-11b/c/d` questions came from a real user: a parent asking about a 16-year-old got the adult
+document list, because the guide only described minors under 10. The guide now covers minors aged
+10 to 17, and both prompts forbid applying one group's rules to another.
 
 ```powershell
 # from the project root, with the backend virtualenv active

@@ -23,6 +23,8 @@ dist/
 # Data and indexes (generated)
 data/
 storage/
+# ...but the storage setup script is code, not data.
+!ops/storage/
 *.index
 *.faiss
 

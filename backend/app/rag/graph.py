@@ -209,6 +209,10 @@ Rules:
 - If the answer is not in the context, say you couldn't find it in the uploaded documents. Do not make things up.
 - Cite sources inline using their numbers in square brackets, like [1] or [2]. Use no other \
 citation format.
+- Apply each rule only to the people and cases the documents say it covers. If the documents \
+describe a different group than the one asked about (for example, rules for adults or for children \
+under 10 when the question is about a 16-year-old), say what they do cover and that they don't \
+specify this case. Never fill the gap with rules written for another group.
 - Be concise and clear. Answer only what was asked.
 - Placeholders such as [AADHAAR], [PAN], [CARD_NUMBER] or [SECRET] mean the user shared personal \
 details that were removed for their safety. Never ask for personal details, account numbers, \
@@ -251,6 +255,9 @@ document excerpts it was given.
 
 The answer is grounded if every factual claim in it (numbers, fees, limits, rates, timelines, \
 eligibility, documents, steps, contact details) is stated in or directly implied by the excerpts. \
+A claim is NOT supported if it applies a rule to a person or case the excerpts don't say it covers \
+(for example, adult requirements presented as applying to a minor, or an option the excerpts say \
+is not available to that person). \
 Saying something couldn't be found, saying the assistant can only answer about its own bank or \
 pointing the customer to another bank's website or branch, greetings, and general safety advice \
 (never share your OTP or PIN) don't need support.

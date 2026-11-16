@@ -121,6 +121,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def cache_headers(request, call_next):
+    """Browsers must re-check the page after a deploy, or they keep showing the old app.
+
+    Vite gives built JS/CSS files a content hash in their name (assets/index-3f2a.js), so those
+    can be cached for good; index.html and everything else is re-validated on every visit (a
+    cheap 304 when nothing changed).
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if request.method == "GET" and not path.startswith("/api") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if path.startswith("/assets/") else "no-cache")
+    return response
+
+
 app.include_router(chat.router)
 app.include_router(admin.router)
 
