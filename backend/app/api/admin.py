@@ -4,13 +4,15 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
 from app.api.deps import require_admin
 from app.config import get_settings
+from app.insights import monitoring as monitor
 from app.insights import store
+from app.rag import answer_cache
 from app.observability import log_event
 from app.rag import doc_storage, registry
 from app.rag.ingestion import IngestionError, delete_document, ingest_pdf
@@ -123,3 +125,33 @@ def export_eval_candidates() -> PlainTextResponse:
         media_type="application/x-ndjson",
         headers={"Content-Disposition": 'attachment; filename="eval-candidates.jsonl"'},
     )
+
+
+@router.get("/monitoring")
+def get_monitoring(hours: int = Query(24, ge=1, le=24 * 90)) -> dict:
+    """Owner dashboard: health, trends, time per step, problems and suggested fixes."""
+    return monitor.monitoring(hours)
+
+
+@router.get("/interactions/{message_id}")
+def get_interaction(message_id: str) -> dict:
+    """The full audit record of one question (for the dashboard's detail view)."""
+    record = store.get(message_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    return record
+
+
+@router.post("/cache/clear")
+def clear_cache() -> dict:
+    cleared = answer_cache.size()
+    answer_cache.clear()
+    log_event(logger, "cache_cleared", entries=cleared)
+    return {"cleared": cleared}
+
+
+@router.get("/audit.csv")
+def export_audit(hours: int = Query(24 * 30, ge=1, le=24 * 90)) -> Response:
+    """The audit log as CSV (questions are already PII-masked)."""
+    return Response(monitor.audit_csv(hours), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="audit-log.csv"'})

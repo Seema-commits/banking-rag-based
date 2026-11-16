@@ -75,10 +75,11 @@ class SQLiteBackend:
         with self.lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO interactions (id, created_at, session_id, question, answer, outcome, sources,"
-                " top_score, latency_ms, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " top_score, latency_ms, rating, comment, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (record["id"], record["created_at"].isoformat(), record.get("session_id"), record["question"],
                  record["answer"], record["outcome"], json.dumps(record.get("sources") or []),
-                 record.get("top_score"), record.get("latency_ms"), json.dumps(details, default=str)),
+                 record.get("top_score"), record.get("latency_ms"), record.get("rating"), record.get("comment"),
+                 json.dumps(details, default=str)),
             )
             if retention > 0:
                 cutoff = (_now() - timedelta(days=retention)).isoformat()
@@ -97,6 +98,18 @@ class SQLiteBackend:
                          (rating, comment, json.dumps(details), message_id))
             return True
 
+    def get(self, message_id: str) -> dict | None:
+        with self.lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM interactions WHERE id = ?", (message_id,)).fetchone()
+        return self._to_record(row) if row else None
+
+    @staticmethod
+    def _to_record(r) -> dict:
+        record = {k: r[k] for k in _CORE}
+        record["sources"] = json.loads(r["sources"] or "[]")
+        record.update(json.loads(r["details"] or "{}"))
+        return record
+
     def recent(self, limit: int, since: datetime | None = None) -> list[dict]:
         query = "SELECT * FROM interactions"
         params: list = []
@@ -107,13 +120,7 @@ class SQLiteBackend:
         params.append(limit)
         with self.lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        records = []
-        for r in rows:
-            record = {k: r[k] for k in _CORE}
-            record["sources"] = json.loads(r["sources"] or "[]")
-            record.update(json.loads(r["details"] or "{}"))
-            records.append(record)
-        return records
+        return [self._to_record(r) for r in rows]
 
 
 # ------------------------------------------------------------------------- Firestore backend
@@ -139,6 +146,18 @@ class FirestoreBackend:
         ref.update({"rating": rating, "comment": comment, "feedback_at": _now()})
         return True
 
+    @staticmethod
+    def _to_record(snap) -> dict:
+        record = {"id": snap.id, **snap.to_dict()}
+        for key in ("created_at", "expire_at", "feedback_at"):
+            if isinstance(record.get(key), datetime):
+                record[key] = record[key].isoformat()
+        return record
+
+    def get(self, message_id: str) -> dict | None:
+        snap = self.collection.document(message_id).get()
+        return self._to_record(snap) if snap.exists else None
+
     def recent(self, limit: int, since: datetime | None = None) -> list[dict]:
         from google.cloud.firestore_v1.base_query import FieldFilter
 
@@ -146,14 +165,7 @@ class FirestoreBackend:
         if since is not None:
             query = query.where(filter=FieldFilter("created_at", ">=", since))
         query = query.order_by("created_at", direction=self.firestore.Query.DESCENDING).limit(limit)
-        records = []
-        for snap in query.stream():
-            record = {"id": snap.id, **snap.to_dict()}
-            for key in ("created_at", "expire_at", "feedback_at"):
-                if isinstance(record.get(key), datetime):
-                    record[key] = record[key].isoformat()
-            records.append(record)
-        return records
+        return [self._to_record(snap) for snap in query.stream()]
 
 
 @lru_cache
@@ -181,6 +193,11 @@ def record_interaction(*, session_id: str, question: str, answer: str, outcome: 
 
 def set_feedback(message_id: str, rating: str, comment: str | None) -> bool:
     return get_backend().set_feedback(message_id, rating, comment)
+
+
+def get(message_id: str) -> dict | None:
+    """One full interaction record, or None."""
+    return get_backend().get(message_id)
 
 
 def recent(limit: int = INSIGHTS_WINDOW, since: datetime | None = None) -> list[dict]:

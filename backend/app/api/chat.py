@@ -46,7 +46,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
     # answered, answered_web, small_talk, not_found, needs_account_access, financial_advice,
-    # off_topic, unsafe, unverified
+    # off_topic, unsafe, unverified, other_bank
     outcome: str
     session_id: str
     # Id for thumbs-up/down feedback on this answer (None if interactions aren't stored).
@@ -81,7 +81,7 @@ def _run_graph(inputs: dict, on_step: Callable[[str], None] | None) -> dict:
 
 # Outcomes worth caching: real answers and deliberate refusals, not errors or small talk.
 _CACHEABLE = {"answered", "answered_web", "not_found", "needs_account_access", "financial_advice",
-              "off_topic", "unsafe"}
+              "off_topic", "unsafe", "other_bank"}
 
 
 def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:
@@ -100,6 +100,23 @@ def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:
         **{k: metrics[k] for k in ("decision", "grounded", "regenerations", "query_rewrites", "web_searched",
                                    "web_results", "cached", "small_talk", "rewritten") if k in metrics},
     }
+
+
+def _store_failure(settings, session_id, question, outcome, metrics, history, started) -> None:
+    """Failed requests go into the audit log too, so the owner's Monitoring tab can show them."""
+    if not settings.store_interactions:
+        return
+    try:
+        details = _audit_details(metrics, history, question.found)
+        if "error_type" in metrics:
+            details["error_type"] = metrics["error_type"]
+        store.record_interaction(
+            session_id=session_id, question=question.text, answer="", outcome=outcome, sources=[],
+            top_score=metrics.get("top_score"), latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            details=details,
+        )
+    except Exception:
+        logger.exception("Could not store the failed interaction")
 
 
 def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
@@ -189,6 +206,8 @@ def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
             timings={k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
         )
     finally:
+        if outcome == "error" or outcome.startswith("llm_"):
+            _store_failure(settings, session_id, question, outcome, metrics, history, started)
         # One structured line per request. No question or answer text, only numbers and flags.
         tokens = metrics.get("prompt_tokens", 0) + metrics.get("completion_tokens", 0)
         usage.add("llm_tokens", tokens)

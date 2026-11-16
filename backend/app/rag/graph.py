@@ -2,6 +2,8 @@
 
     (greetings, thanks, "what can you do?" -> small_talk -> END, no search or LLM call)
     (contextualize -> check_cache: a repeated question is answered from the cache -> END)
+    (a question naming another bank skips the query rewrite and web search: the agent answers the
+     part its own bank's documents cover, or says plainly it can only speak for its own bank)
 
     contextualize -> retrieve -+- nothing relevant ----------------------------> refuse
                                +- chunks -> grade -+- answerable -> generate -> check_grounding
@@ -33,6 +35,7 @@ from langgraph.graph import END, START, StateGraph
 from app import observability as obs
 from app.config import get_settings
 from app.rag import answer_cache
+from app.rag.other_banks import find_other_bank
 from app.rag.retrieval import search
 from app.rag.smalltalk import WITH_SUGGESTIONS, small_talk_reply
 from app.rag.websearch import web_search, web_search_available
@@ -71,8 +74,9 @@ class RAGState(TypedDict, total=False):
     web_searched: bool  # the web tool has been used for this question
     suggestions: list[str]  # clickable example questions to show with the answer
     cached: bool  # the answer came from the answer cache
+    other_bank: str | None  # another bank the question names (we only have our own bank's documents)
     outcome: str  # final: answered, not_found, needs_account_access, financial_advice,
-    #               off_topic, unsafe, unverified
+    #               off_topic, unsafe, unverified, other_bank
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -247,8 +251,9 @@ document excerpts it was given.
 
 The answer is grounded if every factual claim in it (numbers, fees, limits, rates, timelines, \
 eligibility, documents, steps, contact details) is stated in or directly implied by the excerpts. \
-Saying something couldn't be found, greetings, and general safety advice (never share your OTP \
-or PIN) don't need support.
+Saying something couldn't be found, saying the assistant can only answer about its own bank or \
+pointing the customer to another bank's website or branch, greetings, and general safety advice \
+(never share your OTP or PIN) don't need support.
 
 Reply with JSON only: {"grounded": true or false, "unsupported": ["<each unsupported claim>"]}"""
 
@@ -263,6 +268,15 @@ WEB_NOTE = (
     "from official websites found by a web search. Answer only from them, say which website the "
     "information comes from, and mention that the customer should check with the bank how it "
     "applies to their account."
+)
+
+OTHER_BANK_NOTE = (
+    "\n\nThe customer is asking about {other_bank}. These documents are {own_bank}'s, and you know "
+    "nothing about {other_bank}'s accounts, fees, limits or rules. Start with one short sentence "
+    "saying you can only answer for {own_bank}, so for {other_bank} they should check its official "
+    "website, app or branch. Then, only if the documents above help with the rest of the question, "
+    "explain how it works at {own_bank}, saying clearly that these are {own_bank}'s rules, with "
+    "citations. Never state or guess anything about {other_bank}."
 )
 
 _NOT_FOUND = re.compile(
@@ -298,6 +312,11 @@ REFUSALS = {
         "I found related information, but I couldn't verify a reliable answer from the documents. "
         "Please try rephrasing your question, or contact customer care."
     ),
+    "other_bank": (
+        "I can only answer questions about {own_bank}, from its own documents, so I can't tell you "
+        "about {other_bank}'s accounts, fees or rules. Please check {other_bank}'s official website, "
+        "app or branch for that.\n\nIf it helps, ask me how this works at {own_bank}."
+    ),
 }
 _DECISIONS = {"answer", "not_in_documents", "needs_account_access", "financial_advice", "off_topic", "unsafe"}
 
@@ -305,7 +324,7 @@ _DECISIONS = {"answer", "not_in_documents", "needs_account_access", "financial_a
 # it's clear which prompt wording produced it; changes whenever any prompt changes.
 PROMPT_VERSION = hashlib.sha256("\x00".join([
     CONTEXTUALIZE_PROMPT, ANSWER_PROMPT, GRADE_PROMPT, SEARCH_REWRITE_PROMPT, GROUNDING_PROMPT,
-    REGENERATE_NOTE, WEB_NOTE, NO_CONTEXT_ANSWER, *REFUSALS.values(),
+    REGENERATE_NOTE, WEB_NOTE, OTHER_BANK_NOTE, NO_CONTEXT_ANSWER, *REFUSALS.values(),
 ]).encode()).hexdigest()[:10]
 
 
@@ -331,7 +350,8 @@ def contextualize(state: RAGState) -> RAGState:
     history = state.get("history") or []
     base = {"query_rewrites": 0, "regenerations": 0, "unsupported": []}
     if not history:
-        return {**base, "standalone_question": state["question"], "search_query": state["question"]}
+        return {**base, "standalone_question": state["question"], "search_query": state["question"],
+                "other_bank": _other_bank(state["question"])}
     messages = [
         {"role": "system", "content": CONTEXTUALIZE_PROMPT},
         *_history_messages(history),
@@ -341,7 +361,18 @@ def contextualize(state: RAGState) -> RAGState:
         rewritten = complete(messages, fast=True)
     obs.record(rewritten=True)
     standalone = rewritten or state["question"]
-    return {**base, "standalone_question": standalone, "search_query": standalone}
+    # The rewrite keeps the bank only while the follow-up is still about it ("what about for a
+    # 14-year-old?" after an HDFC question), so checking the standalone question is enough.
+    other = _other_bank(standalone)
+    return {**base, "standalone_question": standalone, "search_query": standalone, "other_bank": other}
+
+
+def _other_bank(text: str) -> str | None:
+    settings = get_settings()
+    found = find_other_bank(text, settings.bank_name, settings.other_bank_names)
+    if found:
+        obs.record(other_bank=True)
+    return found
 
 
 def group_sources(docs: list[Document]) -> list[SourceGroup]:
@@ -441,6 +472,10 @@ def route_after_grade(state: RAGState) -> Literal["generate", "rewrite_query", "
         return "generate"
     if decision == "not_in_documents":
         settings = get_settings()
+        if state.get("other_bank"):
+            # Neither a reworded search of our documents nor the government websites will have
+            # another bank's details: say so now instead of spending ~30 s trying.
+            return "refuse"
         if state.get("web_searched"):
             return "refuse"  # the web didn't have it either
         web = web_search_available()
@@ -491,6 +526,9 @@ def generate(state: RAGState) -> RAGState:
     system = ANSWER_PROMPT.format(context=_format_context(state["sources"]))
     if state.get("web_searched"):
         system += WEB_NOTE
+    if state.get("other_bank"):
+        settings = get_settings()
+        system += OTHER_BANK_NOTE.format(other_bank=state["other_bank"], own_bank=settings.bank_name)
     if state.get("unsupported"):
         system += REGENERATE_NOTE.format(claims="; ".join(state["unsupported"]))
     messages = [
@@ -553,7 +591,12 @@ def route_after_grounding(state: RAGState) -> Literal["generate", "refuse", "__e
 def refuse(state: RAGState) -> RAGState:
     decision = state.get("decision") or "not_in_documents"
     outcome = "not_found" if decision in ("not_in_documents", "answer") else decision
-    return {"answer": REFUSALS[outcome], "outcome": outcome, "sources": [], "documents": []}
+    if state.get("other_bank") and outcome in ("not_found", "unverified"):
+        outcome = "other_bank"
+    answer = REFUSALS[outcome]
+    if outcome == "other_bank":
+        answer = answer.format(other_bank=state["other_bank"], own_bank=get_settings().bank_name)
+    return {"answer": answer, "outcome": outcome, "sources": [], "documents": []}
 
 
 @lru_cache

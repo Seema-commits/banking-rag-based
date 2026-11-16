@@ -113,6 +113,12 @@ class Settings(BaseSettings):
         "What is the minimum balance for a savings account?",
     ]
 
+    # The bank whose documents the assistant answers from. Questions naming another bank (HDFC,
+    # SBI, ...) get a clear "I can only answer about <bank>" reply instead of a slow, failed
+    # attempt; the part of the question its own documents cover is still answered.
+    bank_name: str = "Thistlewood Bank"
+    other_bank_names: list[str] = []  # extra names to recognise, on top of the built-in list
+
     # Abuse protection for the public chat endpoint (0 disables a limit).
     chat_requests_per_minute_per_ip: int = 10
     chat_requests_per_day: int = 500  # across all users, protects the Groq quota
@@ -121,6 +127,12 @@ class Settings(BaseSettings):
     # billing Google Cloud can't see. Set them to your Groq / Tavily plan limits. 0 = off.
     daily_llm_token_warning: int = 300_000
     daily_web_search_warning: int = 30  # Tavily free tier: ~1,000 searches a month
+
+    # Monitoring tab: answers slower than this are listed as slow; optional token prices (USD per
+    # million tokens, from your Groq plan) to estimate LLM cost. 0 = don't estimate.
+    slow_answer_ms: int = 10_000
+    llm_cost_per_million_input_tokens: float = 0.0
+    llm_cost_per_million_output_tokens: float = 0.0
 
     # Security / API
     admin_api_key: str = ""
