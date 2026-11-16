@@ -46,7 +46,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
     # answered, answered_web, small_talk, not_found, needs_account_access, financial_advice,
-    # off_topic, unsafe, unverified
+    # off_topic, unsafe, unverified, other_bank
     outcome: str
     session_id: str
     # Id for thumbs-up/down feedback on this answer (None if interactions aren't stored).
@@ -81,7 +81,7 @@ def _run_graph(inputs: dict, on_step: Callable[[str], None] | None) -> dict:
 
 # Outcomes worth caching: real answers and deliberate refusals, not errors or small talk.
 _CACHEABLE = {"answered", "answered_web", "not_found", "needs_account_access", "financial_advice",
-              "off_topic", "unsafe"}
+              "off_topic", "unsafe", "other_bank"}
 
 
 def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:

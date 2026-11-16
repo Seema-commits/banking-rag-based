@@ -143,6 +143,7 @@ To change them, copy `frontend/.env.example` to `frontend/.env` and edit, and se
 | **PII masking**: Aadhaar, PAN, card numbers (Luhn-checked), account and phone numbers, emails, UPI IDs and OTP/PIN/CVV values are replaced with placeholders such as `[AADHAAR]` before the question or history reaches the LLM, the vector search or the logs; the user sees a privacy notice | `backend/app/guardrails/pii.py`, tests in `backend/tests/` |
 | **Scope grader**: refuses account-data requests, financial advice, off-topic and instruction-override attempts with a specific message | `grade` node, `backend/app/rag/graph.py` |
 | **Grounding check**: every factual claim verified against the sources; regenerate once, otherwise refuse | `check_grounding` node |
+| **Other banks**: a question naming another bank (HDFC, SBI, ICICI…) skips the search retry and web search, says plainly that the assistant only speaks for `BANK_NAME`, and still answers the part its own documents cover. A real question about HDFC's minimum balance used to take ~30 s and end in "couldn't verify"; it now takes one pass | `backend/app/rag/other_banks.py`, `BANK_NAME`, `OTHER_BANK_NAMES` |
 | **Web tool limits**: official-site allowlist (enforced by the API and re-checked on each result URL), fallback only, results trimmed and treated as data, answers labelled as from the web | `backend/app/rag/websearch.py` |
 | **Prompt-injection resistance**: chat history kept on the server (clients only send a session id, so they can't forge assistant turns); documents wrapped in a `<documents>` block and treated as data, never instructions | `backend/app/api/sessions.py`, prompts in `graph.py` |
 | **Grounded answers**: answer only from retrieved context, cite sources, say "not found" otherwise; never ask for personal details | `backend/app/rag/graph.py` (prompt) |
@@ -317,4 +318,5 @@ citations point at returned sources and at the expected page. Full results are w
 
 Uploaded files, the Chroma index, the document registry and the interaction database are
 stored in `backend/storage/`. `outcome` is one of `answered`, `answered_web`, `small_talk`, `not_found`, `unverified`,
-`needs_account_access`, `financial_advice`, `off_topic` or `unsafe`.
+`needs_account_access`, `financial_advice`, `off_topic`, `unsafe` or `other_bank` (the question
+names a different bank, see below).

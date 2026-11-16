@@ -113,6 +113,12 @@ class Settings(BaseSettings):
         "What is the minimum balance for a savings account?",
     ]
 
+    # The bank whose documents the assistant answers from. Questions naming another bank (HDFC,
+    # SBI, ...) get a clear "I can only answer about <bank>" reply instead of a slow, failed
+    # attempt; the part of the question its own documents cover is still answered.
+    bank_name: str = "Thistlewood Bank"
+    other_bank_names: list[str] = []  # extra names to recognise, on top of the built-in list
+
     # Abuse protection for the public chat endpoint (0 disables a limit).
     chat_requests_per_minute_per_ip: int = 10
     chat_requests_per_day: int = 500  # across all users, protects the Groq quota

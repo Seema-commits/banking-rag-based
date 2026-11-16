@@ -25,7 +25,7 @@ const LATENCY_SERIES = [
 const OUTCOME_LABELS = {
   answered: "Answered", answered_web: "Answered from web", small_talk: "Small talk",
   not_found: "Not in documents", unverified: "Couldn't verify", needs_account_access: "Needs account access",
-  financial_advice: "Advice request", off_topic: "Off topic", unsafe: "Unsafe",
+  financial_advice: "Advice request", off_topic: "Off topic", unsafe: "Unsafe", other_bank: "Other bank",
   llm_auth_error: "Groq key rejected", llm_rate_limited: "Groq rate limit", llm_not_configured: "Groq key missing",
   error: "Error",
 };

@@ -21,7 +21,8 @@ Masked personal data is reported by type only (for example `"pii_masked": ["AADH
 
 `outcome` is one of: `answered`, `answered_web` (answered from the web search tool), `small_talk`, `not_found` (no relevant documents), `unverified` (answer
 failed the grounding check), `needs_account_access`, `financial_advice`, `off_topic`, `unsafe`
-(refused by the grader), `llm_auth_error` (bad Groq key), `llm_rate_limited` (Groq quota),
+(refused by the grader), `other_bank` (the question names another bank; see `other_bank` in the
+fields), `llm_auth_error` (bad Groq key), `llm_rate_limited` (Groq quota),
 `llm_not_configured`, `error` (anything else; see `error_type`).
 
 Agent fields: `small_talk`, `web_searched`, `web_results`, `web_search_ms`, `decision` (grader verdict), `grade_ms`, `query_rewrites`, `query_rewrite_ms`,
