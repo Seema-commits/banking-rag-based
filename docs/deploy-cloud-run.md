@@ -69,7 +69,7 @@ Press Enter afterwards.
 read -rs -p "Paste your Groq API key: " KEY && printf '%s' "$KEY" | gcloud secrets create groq-api-key --data-file=- && unset KEY
 ```
 
-**Admin key** (the password for the Admin tab). Choose a long, random password that you
+**Admin key** (the password for the admin page, at `<your URL>/#admin`). Choose a long, random password that you
 don't use anywhere else, and save it in your password manager.
 
 ```bash

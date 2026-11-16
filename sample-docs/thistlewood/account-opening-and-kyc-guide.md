@@ -51,7 +51,31 @@ A small account is valid for 12 months. It can be extended for another 12 months
 
 ## Minors
 
-A savings account for a minor under 10 years is opened and operated by a parent or legal guardian. We need the minor's birth certificate or an OVD, and full KYC documents of the guardian. Minors aged 10 years and above may operate their account independently, with limits on withdrawals.
+A minor is anyone under 18 years of age. Accounts for minors are opened at a Thistlewood Bank branch. Video KYC is not available for minors.
+
+**Minors under 10 years.** The account is opened and operated by a parent or legal guardian. We need:
+
+- The minor's birth certificate or an OVD of the minor.
+- One recent passport-size photograph of the minor.
+- Full KYC documents of the parent or guardian: an OVD, PAN card or Form 60, and a photograph.
+
+**Minors aged 10 to 17 years.** The minor may open and operate the account independently, or jointly with a parent or guardian. We need:
+
+- Proof of age: the minor's birth certificate, passport or school leaving certificate.
+- One OVD of the minor as proof of identity and address. If the minor's OVD does not show the current address, the parent or guardian's OVD can be used with a signed declaration of the relationship.
+- The minor's PAN card, or Form 60 if the minor does not have a PAN.
+- One recent passport-size photograph of the minor.
+- The parent or guardian's OVD and mobile number, because they are recorded as the guardian on the account.
+
+Limits on accounts operated by minors aged 10 to 17 years:
+
+- Withdrawals and transfers: up to Rs 10,000 a day.
+- Debit card with ATM withdrawals up to Rs 5,000 a day. No cheque book, overdraft or loans.
+- No minimum balance is required.
+
+When the minor turns 18, the account becomes a regular savings account. The account holder must give a fresh specimen signature and complete KYC as an adult within 3 months.
+
+---pagebreak---
 
 ## Non-Resident Indians (NRIs)
 

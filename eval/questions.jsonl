@@ -7,8 +7,11 @@
 {"id": "kyc-07", "type": "in_scope", "question": "I have no identity documents at all. Can I still open an account?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["small account"]}
 {"id": "kyc-08", "type": "in_scope", "question": "What is the maximum balance allowed in a small account?", "sources": [["account-opening-and-kyc-guide", 2]], "answer_keywords": ["50,000"]}
 {"id": "kyc-09", "type": "in_scope", "question": "How can my 8 year old daughter get a bank account?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["guardian", "parent"]}
-{"id": "kyc-10", "type": "in_scope", "question": "What documents does an NRI need to open an account?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["visa", "passport", "overseas"]}
-{"id": "kyc-11", "type": "in_scope", "question": "How long does it take to activate my account after I visit the branch?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["1 working day", "one working day"]}
+{"id": "kyc-10", "type": "in_scope", "question": "What documents does an NRI need to open an account?", "sources": [["account-opening-and-kyc-guide", 4]], "answer_keywords": ["visa", "passport", "overseas"]}
+{"id": "kyc-11", "type": "in_scope", "question": "How long does it take to activate my account after I visit the branch?", "sources": [["account-opening-and-kyc-guide", 4]], "answer_keywords": ["1 working day", "one working day"]}
+{"id": "kyc-11b", "type": "in_scope", "question": "what documents i need to open account of my 16 years old daughter", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["proof of age", "guardian", "Form 60"]}
+{"id": "kyc-11c", "type": "in_scope", "question": "Can my 15 year old son do Video KYC to open his account?", "sources": [["account-opening-and-kyc-guide", 3], ["video-kyc-guide", 1]], "answer_keywords": ["branch"]}
+{"id": "kyc-11d", "type": "in_scope", "question": "What are the withdrawal limits on a minor's account?", "sources": [["account-opening-and-kyc-guide", 3]], "answer_keywords": ["10,000"]}
 {"id": "vkyc-01", "type": "in_scope", "question": "What is Video KYC?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["video call", "V-CIP"]}
 {"id": "vkyc-02", "type": "in_scope", "question": "Can I complete video KYC while I am travelling abroad?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["India", "outside India"]}
 {"id": "vkyc-03", "type": "in_scope", "question": "What should I keep ready before the video KYC call?", "sources": [["video-kyc-guide", 1]], "answer_keywords": ["original PAN", "white paper", "pen"]}
@@ -34,7 +37,7 @@
 {"id": "fees-06", "type": "in_scope", "question": "What interest rate will I earn on my savings account?", "sources": [["fees-charges-and-support-faq", 2]], "answer_keywords": ["2.75%", "3.25%"]}
 {"id": "fees-07", "type": "in_scope", "question": "I lost my debit card. How do I block it?", "sources": [["fees-charges-and-support-faq", 3]], "answer_keywords": ["app", "1800-000-0000"]}
 {"id": "fees-08", "type": "in_scope", "question": "How do I file a complaint if the bank does not resolve my issue?", "sources": [["fees-charges-and-support-faq", 3]], "answer_keywords": ["Nodal Officer", "Ombudsman"]}
-{"id": "fees-09", "type": "in_scope", "question": "What is the customer care phone number?", "sources": [["fees-charges-and-support-faq", 3], ["account-opening-and-kyc-guide", 3], ["video-kyc-guide", 3]], "answer_keywords": ["1800-000-0000"]}
+{"id": "fees-09", "type": "in_scope", "question": "What is the customer care phone number?", "sources": [["fees-charges-and-support-faq", 3], ["account-opening-and-kyc-guide", 4], ["video-kyc-guide", 3]], "answer_keywords": ["1800-000-0000"]}
 {"id": "oos-01", "type": "out_of_scope", "question": "What's the weather in Mumbai today?"}
 {"id": "oos-02", "type": "out_of_scope", "question": "Who won the cricket world cup in 2011?"}
 {"id": "oos-03", "type": "out_of_scope", "question": "Write a Python function to sort a list."}

@@ -73,6 +73,9 @@ input, textarea {
 .tab.active { background: var(--bg); color: var(--text); font-weight: 600; }
 
 .content { flex: 1; min-height: 0; display: flex; justify-content: center; }
+/* Wrapper that keeps the chat mounted while Admin is open; invisible to the layout. */
+.view { display: contents; }
+.view[hidden] { display: none; }
 
 /* Chat */
 .chat { display: flex; flex-direction: column; width: 100%; max-width: 820px; min-height: 0; }
