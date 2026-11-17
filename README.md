@@ -61,8 +61,10 @@ The agent is in `backend/app/rag/graph.py`, retrieval in `backend/app/rag/retrie
 ingestion in `backend/app/rag/ingestion.py`.
 
 **Speed.** The agent's internal checks (grading, query rewriting, grounding) run on a small fast
-model (`CHECK_MODEL`, default `llama-3.1-8b-instant`, falling back to `GROQ_MODEL` if it is
-unavailable), while the customer-facing answer uses `GROQ_MODEL`. When the documents don't
+model (`CHECK_MODEL`, default `openai/gpt-oss-20b`), while the customer-facing answer uses
+`GROQ_MODEL`. If the check model fails, checks fall back to `GROQ_MODEL`, the model is retried
+every 10 minutes, and the Monitoring tab shows a warning with Groq's error (this is how a model
+that stopped being available, `llama-3.1-8b-instant`, was caught). When the documents don't
 answer, the agent goes straight to the web tool and doesn't re-grade the allowlisted results
 (`REWRITE_BEFORE_WEB`, `GRADE_WEB_RESULTS` restore the slower, more cautious path). The chat
 calls `/api/chat/stream`, which reports each agent step as it starts, so the UI shows progress

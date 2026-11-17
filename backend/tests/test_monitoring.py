@@ -87,6 +87,43 @@ def test_recommendations(records):
     assert "History is stored in a local file" in titles
 
 
+def _status(falling_back, error=None):
+    return {"configured": "llama-3.1-8b-instant", "active": "openai/gpt-oss-120b" if falling_back else
+            "llama-3.1-8b-instant", "falling_back": falling_back, "error": error, "failed_at": None,
+            "retry_in_s": 300 if falling_back else 0}
+
+
+def test_warns_while_checks_run_on_the_big_model(records, monkeypatch):
+    error = "NotFoundError: The model `llama-3.1-8b-instant` does not exist or you do not have access to it."
+    monkeypatch.setattr(monitoring.graph, "check_model_status", lambda: _status(True, error))
+    m = monitoring.monitoring(24)
+    rec = next(r for r in m["recommendations"] if "big model" in r["title"])
+    assert rec["severity"] == "warning" and "openai/gpt-oss-120b" in rec["title"]
+    assert "does not exist" in rec["detail"] and "CHECK_MODEL" in rec["detail"]
+    assert m["check_model"]["falling_back"]
+
+
+def test_notes_past_answers_checked_on_the_big_model(records, monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "groq_model", "openai/gpt-oss-120b")
+    monkeypatch.setattr(s, "check_model", "openai/gpt-oss-20b")
+    monkeypatch.setattr(monitoring.graph, "check_model_status", lambda: _status(False))
+    backend = store.get_backend()
+    now = datetime.now(timezone.utc)
+    for i, check in enumerate(["openai/gpt-oss-120b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]):
+        backend.add({"id": f"m{i}", "created_at": now - timedelta(minutes=3), "session_id": "s", "question": "q",
+                     "answer": "a", "outcome": "answered", "sources": [], "latency_ms": 1500,
+                     "llm_model": "openai/gpt-oss-120b", "check_model": check})
+    titles = [r["title"] for r in monitoring.monitoring(24)["recommendations"]]
+    assert "2 answers in this period ran their checks on the big model" in titles
+    assert not any(t.startswith("Checks are running") for t in titles)
+
+
+def test_no_check_model_note_when_all_is_well(records, monkeypatch):
+    monkeypatch.setattr(monitoring.graph, "check_model_status", lambda: _status(False))
+    assert not any("big model" in r["title"] for r in monitoring.monitoring(24)["recommendations"])
+
+
 def test_get_and_csv(records):
     assert store.get(records)["comment"] == "wrong" and store.get("missing") is None
     rows = list(csv.DictReader(io.StringIO(monitoring.audit_csv(24))))

@@ -65,8 +65,11 @@ class Settings(BaseSettings):
     max_regenerations: int = 1  # retries when the answer has unsupported claims
     # Model for the agent's internal checks (grading, rewriting, grounding check). A small fast
     # model makes these much quicker; the customer-facing answer always uses GROQ_MODEL.
-    # Empty = use GROQ_MODEL for everything. Falls back to GROQ_MODEL if this model fails.
-    check_model: str = "llama-3.1-8b-instant"
+    # Empty = use GROQ_MODEL for everything. If this model fails (for example the provider retires
+    # it), checks fall back to GROQ_MODEL and the model is tried again after check_model_retry_seconds;
+    # the Monitoring tab shows a warning while that's happening.
+    check_model: str = "openai/gpt-oss-20b"
+    check_model_retry_seconds: int = 600
     # Reasoning effort for checks on reasoning models (gpt-oss, qwen3): "low" is faster.
     check_reasoning_effort: str = "low"
 

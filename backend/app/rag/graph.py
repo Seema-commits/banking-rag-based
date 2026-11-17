@@ -23,7 +23,9 @@ import hashlib
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Literal, TypedDict
 
@@ -91,7 +93,27 @@ def get_client() -> Groq:
     return Groq(api_key=settings.groq_api_key)
 
 
-_check_model_failed = False  # set once the fast check model is found unusable (e.g. retired)
+# When CHECK_MODEL fails (retired, not available to this key...), checks use GROQ_MODEL until
+# this time (time.monotonic()), then the check model is tried again. The error is kept so the
+# Monitoring tab can say why answers got slower.
+_check_model_down_until = 0.0
+_check_model_error = ""  # Groq's message from the last failure; "" while the check model works
+_check_model_failed_at: str | None = None  # ISO time of that failure
+_clock = time.monotonic  # replaced in tests
+
+
+def _groq_message(exc: Exception) -> str:
+    """The human-readable part of a Groq error, e.g. "The model `x` does not exist..."."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error", body)
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])[:300]
+    return (str(exc) or type(exc).__name__)[:300]
+
+
+def _check_model_usable() -> bool:
+    return _clock() >= _check_model_down_until
 
 
 def _supports_reasoning_effort(model: str) -> bool:
@@ -120,14 +142,15 @@ def complete(messages: list[dict], json_mode: bool = False, fast: bool = False) 
 
     fast=True is for the agent's quick internal steps (rewriting a question, grading chunks,
     checking grounding). Those run on CHECK_MODEL, a small fast model, when one is set, with low
-    reasoning effort on reasoning models. If the check model fails (for example it was retired),
-    the call falls back to the main model and keeps using it. The customer-facing answer always
-    uses GROQ_MODEL with its default settings.
+    reasoning effort on reasoning models. If the check model fails (for example the provider
+    retired it), the call falls back to the main model, which is used for checks until
+    CHECK_MODEL_RETRY_SECONDS have passed; then the check model is tried again. The
+    customer-facing answer always uses GROQ_MODEL with its default settings.
     """
-    global _check_model_failed
+    global _check_model_down_until, _check_model_error, _check_model_failed_at
     settings = get_settings()
     model = settings.groq_model
-    if fast and settings.check_model and not _check_model_failed:
+    if fast and settings.check_model and settings.check_model != settings.groq_model and _check_model_usable():
         model = settings.check_model
     with obs.timed("llm"):
         try:
@@ -135,11 +158,17 @@ def complete(messages: list[dict], json_mode: bool = False, fast: bool = False) 
         except (groq.NotFoundError, groq.BadRequestError, groq.PermissionDeniedError) as exc:
             if model == settings.groq_model:
                 raise
-            _check_model_failed = True
-            logger.warning("CHECK_MODEL %s failed (%s); using %s for checks", model,
-                           type(exc).__name__, settings.groq_model)
+            _check_model_down_until = _clock() + max(settings.check_model_retry_seconds, 0)
+            _check_model_error = f"{type(exc).__name__}: {_groq_message(exc)}"
+            _check_model_failed_at = datetime.now(timezone.utc).isoformat()
+            logger.warning("CHECK_MODEL %s failed (%s); using %s for checks, retrying in %ss", model,
+                           _check_model_error, settings.groq_model, settings.check_model_retry_seconds)
             model = settings.groq_model
             chat_completion = _create(model, messages, json_mode, fast)
+        else:
+            if model != settings.groq_model and _check_model_error:
+                logger.info("CHECK_MODEL %s works again; checks use it", model)
+                _check_model_error, _check_model_failed_at = "", None
     obs.add("llm_calls", 1)
     usage = getattr(chat_completion, "usage", None)
     if usage is not None:
@@ -338,7 +367,24 @@ PROMPT_VERSION = hashlib.sha256("\x00".join([
 def active_check_model() -> str:
     """The model the agent's checks are using right now (after any fallback)."""
     settings = get_settings()
-    return settings.groq_model if _check_model_failed or not settings.check_model else settings.check_model
+    if not settings.check_model or not _check_model_usable():
+        return settings.groq_model
+    return settings.check_model
+
+
+def check_model_status() -> dict:
+    """For the Monitoring tab: is the fast check model in use, and if not, why."""
+    settings = get_settings()
+    falling_back = bool(settings.check_model) and settings.check_model != settings.groq_model \
+        and not _check_model_usable()
+    return {
+        "configured": settings.check_model or None,
+        "active": active_check_model(),
+        "falling_back": falling_back,
+        "error": _check_model_error or None,
+        "failed_at": _check_model_failed_at,
+        "retry_in_s": max(0, round(_check_model_down_until - _clock())) if falling_back else 0,
+    }
 
 
 def route_start(state: RAGState) -> Literal["small_talk", "contextualize"]:
