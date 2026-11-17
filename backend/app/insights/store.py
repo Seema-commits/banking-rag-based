@@ -103,6 +103,21 @@ class SQLiteBackend:
             row = conn.execute("SELECT * FROM interactions WHERE id = ?", (message_id,)).fetchone()
         return self._to_record(row) if row else None
 
+    def update_fields(self, ids: list[str], fields: dict) -> int:
+        """Merge review/exclusion fields into these records; returns how many exist."""
+        updated = 0
+        with self.lock, self._connect() as conn:
+            for message_id in ids:
+                row = conn.execute("SELECT details FROM interactions WHERE id = ?", (message_id,)).fetchone()
+                if row is None:
+                    continue
+                details = {**json.loads(row["details"] or "{}"),
+                           **{k: v.isoformat() if isinstance(v, datetime) else v for k, v in fields.items()}}
+                conn.execute("UPDATE interactions SET details = ? WHERE id = ?",
+                             (json.dumps(details, default=str), message_id))
+                updated += 1
+        return updated
+
     @staticmethod
     def _to_record(r) -> dict:
         record = {k: r[k] for k in _CORE}
@@ -146,10 +161,22 @@ class FirestoreBackend:
         ref.update({"rating": rating, "comment": comment, "feedback_at": _now()})
         return True
 
+    def update_fields(self, ids: list[str], fields: dict) -> int:
+        from google.api_core.exceptions import NotFound
+
+        updated = 0
+        for message_id in ids:
+            try:
+                self.collection.document(message_id).update(fields)
+                updated += 1
+            except NotFound:
+                continue
+        return updated
+
     @staticmethod
     def _to_record(snap) -> dict:
         record = {"id": snap.id, **snap.to_dict()}
-        for key in ("created_at", "expire_at", "feedback_at"):
+        for key in ("created_at", "expire_at", "feedback_at", "reviewed_at", "excluded_at"):
             if isinstance(record.get(key), datetime):
                 record[key] = record[key].isoformat()
         return record
@@ -205,6 +232,30 @@ def recent(limit: int = INSIGHTS_WINDOW, since: datetime | None = None) -> list[
     return get_backend().recent(limit, since)
 
 
+MAX_MARK = 200  # records changed by one request
+
+
+def mark(ids: list[str] | None = None, *, session_id: str | None = None, reviewed: bool | None = None,
+         excluded: bool | None = None, note: str | None = None) -> int:
+    """Mark records reviewed (off the dashboard's to-do lists, still counted) and/or excluded (left out
+    of every statistic, e.g. the owner's own test questions). Nothing is deleted, and both can be
+    undone; the audit log keeps every record. With session_id, marks that whole conversation.
+    Returns the number of records changed."""
+    targets = list(dict.fromkeys(ids or []))
+    if session_id:
+        targets += [r["id"] for r in recent() if r.get("session_id") == session_id and r["id"] not in targets]
+    targets = targets[:MAX_MARK]
+    fields: dict = {}
+    if reviewed is not None:
+        fields.update(reviewed=reviewed, reviewed_at=_now() if reviewed else None,
+                      review_note=(note or None) if reviewed else None)
+    if excluded is not None:
+        fields.update(excluded=excluded, excluded_at=_now() if excluded else None)
+    if not targets or not fields:
+        return 0
+    return get_backend().update_fields(targets, fields)
+
+
 def _normalise(question: str) -> str:
     return " ".join(question.lower().split())
 
@@ -215,8 +266,11 @@ def _unanswered(records: list[dict]) -> list[dict]:
         if r["outcome"] not in ("not_found", "unverified"):
             continue
         g = groups.setdefault(_normalise(r["question"]), {
-            "question": _normalise(r["question"]), "count": 0, "last_seen": r["created_at"], "outcomes": set()})
+            "question": _normalise(r["question"]), "count": 0, "last_seen": r["created_at"], "outcomes": set(),
+            "ids": [], "reviewed": True})
         g["count"] += 1
+        g["ids"].append(r["id"])
+        g["reviewed"] = g["reviewed"] and bool(r.get("reviewed"))
         g["last_seen"] = max(g["last_seen"], r["created_at"])
         g["outcomes"].add(r["outcome"])
     # Most frequently asked first; ties broken by the most recent.
@@ -250,7 +304,7 @@ def insights(limit: int = 20) -> dict:
 
 def eval_candidates() -> list[dict]:
     """Unanswered and downvoted questions, in the eval file's format, for a human to label."""
-    records = recent()
+    records = [r for r in recent() if not r.get("excluded")]  # test questions aren't eval material
     groups: dict[str, dict] = {}
     for r in records:
         if r["outcome"] in ("not_found", "unverified") or r.get("rating") == "down":

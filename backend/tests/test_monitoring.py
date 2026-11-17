@@ -142,3 +142,72 @@ def test_percentile():
     assert monitoring.percentile([], 0.5) is None
     assert monitoring.percentile([1, 2, 3, 4], 0.5) == 2.5
     assert monitoring.percentile([10], 0.95) == 10
+
+
+# ---- review and exclusion (nothing is deleted) ----
+
+def _ids(m, key):
+    return [r["id"] for r in m[key]]
+
+
+def test_reviewed_leaves_the_lists_but_still_counts(records):
+    down = records
+    before = monitoring.monitoring(24)
+    assert down in _ids(before, "downvoted")
+    gap = before["gaps"][0]
+    assert store.mark([down], reviewed=True, note="answer fixed") == 1
+    assert store.mark(gap["ids"], reviewed=True) == 2  # both "home loan rate?" questions
+    after = monitoring.monitoring(24)
+    assert down not in _ids(after, "downvoted") and after["gaps"] == []
+    assert after["summary"]["total"] == before["summary"]["total"]  # still counted
+    assert after["summary"]["feedback"] == before["summary"]["feedback"]
+    assert after["hidden"]["reviewed"] == 3
+    assert not any("couldn't answer" in r["title"] for r in after["recommendations"])
+    shown = monitoring.monitoring(24, show_hidden=True)
+    assert next(r for r in shown["downvoted"] if r["id"] == down)["reviewed"] is True
+    assert shown["gaps"][0]["reviewed"] is True
+    # the suggestions don't change when hidden items are shown
+    assert shown["recommendations"] == after["recommendations"]
+    rec = store.get(down)
+    assert rec["review_note"] == "answer fixed" and rec["reviewed_at"]
+
+
+def test_excluded_leaves_every_number_and_can_be_undone(records):
+    down = records
+    before = monitoring.monitoring(24)["summary"]
+    store.mark([down], excluded=True)
+    m = monitoring.monitoring(24)
+    assert m["summary"]["total"] == before["total"] - 1
+    assert m["summary"]["feedback"]["down"] == 0 and down not in _ids(m, "downvoted")
+    assert m["hidden"]["excluded"] == 1 and m["excluded"] == []
+    assert [r["id"] for r in monitoring.monitoring(24, show_hidden=True)["excluded"]] == [down]
+    assert all(c["rating"] != "down" for c in store.eval_candidates())  # test data isn't eval material
+    store.mark([down], excluded=False)
+    assert monitoring.monitoring(24)["summary"] == before
+    assert store.get(down)["excluded"] is False  # the record itself was never removed
+
+
+def test_whole_conversation_and_unknown_ids(records):
+    total = monitoring.monitoring(24)["summary"]["total"]
+    assert store.mark(session_id="s", excluded=True) == total + 1  # 9 in the window + the 30 h old one
+    assert monitoring.monitoring(24)["summary"]["total"] == 0
+    assert store.mark(["no-such-id"], reviewed=True) == 0
+    assert store.mark([records]) == 0  # nothing to set
+
+
+def test_mark_endpoint(records, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setattr(get_settings(), "admin_api_key", "secret")
+    client = TestClient(app)
+    url = "/api/admin/interactions/mark"
+    assert client.post(url, json={"ids": [records], "reviewed": True}).status_code == 401
+    headers = {"X-Admin-Key": "secret"}
+    assert client.post(url, json={"ids": [records]}, headers=headers).status_code == 422
+    assert client.post(url, json={"reviewed": True}, headers=headers).status_code == 422
+    r = client.post(url, json={"ids": [records], "reviewed": True, "note": "ok"}, headers=headers)
+    assert r.status_code == 200 and r.json() == {"updated": 1}
+    m = client.get("/api/admin/monitoring?hours=24&show_hidden=true", headers=headers).json()
+    assert next(x for x in m["downvoted"] if x["id"] == records)["reviewed"] is True

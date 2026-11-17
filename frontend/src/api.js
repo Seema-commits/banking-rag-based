@@ -83,7 +83,17 @@ export const api = {
 
   insights: (adminKey) => request("/api/admin/insights", { adminKey }),
 
-  monitoring: (adminKey, hours) => request(`/api/admin/monitoring?hours=${hours}`, { adminKey }),
+  monitoring: (adminKey, hours, showHidden = false) =>
+    request(`/api/admin/monitoring?hours=${hours}${showHidden ? "&show_hidden=true" : ""}`, { adminKey }),
+
+  // Mark records reviewed / excluded from stats, or undo: { ids?, session_id?, reviewed?, excluded?, note? }.
+  mark: (adminKey, body) =>
+    request("/api/admin/interactions/mark", {
+      method: "POST",
+      adminKey,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 
   interaction: (adminKey, id) => request(`/api/admin/interactions/${encodeURIComponent(id)}`, { adminKey }),
 

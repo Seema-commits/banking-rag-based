@@ -76,6 +76,7 @@ def _brief(record: dict) -> dict:
         "slowest_step_ms": slow[1] if slow else None,
         "rating": record.get("rating"), "comment": record.get("comment"),
         "error_type": record.get("error_type"),
+        "reviewed": bool(record.get("reviewed")), "excluded": bool(record.get("excluded")),
     }
 
 
@@ -130,7 +131,7 @@ def recommendations(summary: dict, errors: list[dict], steps: list[dict], gaps: 
     elif big_model_checks:
         recs.append({
             "severity": "info",
-            "title": f"{big_model_checks} answers in this period ran their checks on the big model",
+            "title": f"{big_model_checks} answer{'s' if big_model_checks != 1 else ''} in this period ran their checks on the big model",
             "detail": f"The fast check model ({s.check_model}) wasn't available when they were asked, so "
                       "they were slower. It is working now.",
         })
@@ -159,14 +160,14 @@ def recommendations(summary: dict, errors: list[dict], steps: list[dict], gaps: 
                      "detail": f"{advice} ({top['label']} averages {top['avg_ms'] / 1000:.1f} s.)"})
     if gaps:
         top = ", ".join(f"“{g['question']}”" for g in gaps[:3])
-        recs.append({"severity": "info", "title": f"{len(gaps)} questions the documents couldn't answer",
+        recs.append({"severity": "info", "title": f"{len(gaps)} question{'s' if len(gaps) != 1 else ''} the documents couldn't answer",
                      "detail": f"Most asked: {top}. Upload a document that covers them.", "action": "upload"})
     fb = summary["feedback"]
     if fb["up"] + fb["down"] >= 5 and fb["down"] / (fb["up"] + fb["down"]) >= 0.2:
         recs.append({"severity": "warning", "title": f"{fb['down']} answers marked 👎",
                      "detail": "Review them below; add real failures to the eval set with Export eval candidates."})
     if unverified:
-        recs.append({"severity": "info", "title": f"{unverified} answers failed the fact-check",
+        recs.append({"severity": "info", "title": f"{unverified} answer{'s' if unverified != 1 else ''} failed the fact-check",
                      "detail": "The documents may be unclear or contradict each other on these topics. "
                                "Open them below to see which sources were used."})
     for metric, value in today.items():
@@ -182,11 +183,23 @@ def recommendations(summary: dict, errors: list[dict], steps: list[dict], gaps: 
     return sorted(recs, key=lambda r: order[r["severity"]])
 
 
-def monitoring(hours: int = 24) -> dict:
+def monitoring(hours: int = 24, show_hidden: bool = False) -> dict:
+    """The dashboard for the last `hours`.
+
+    Records marked excluded (e.g. the owner's test questions) are left out of every number and
+    chart. Records marked reviewed still count, but leave the problem lists; show_hidden puts them
+    back (flagged) and lists the excluded ones, so either can be undone.
+    """
     s = get_settings()
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=hours)
-    records = store.recent(limit=WINDOW_LIMIT, since=start)
+    fetched = store.recent(limit=WINDOW_LIMIT, since=start)
+    excluded = [r for r in fetched if r.get("excluded")]
+    records = [r for r in fetched if not r.get("excluded")]
+
+    def to_do(r: dict) -> bool:
+        return show_hidden or not r.get("reviewed")
+
     total = len(records)
     uncached = [r for r in records if not r.get("cached") and r.get("latency_ms") is not None]
     latencies = [r["latency_ms"] for r in uncached]
@@ -218,8 +231,11 @@ def monitoring(hours: int = 24) -> dict:
                 g["examples"].append(_brief(r))
     errors = sorted(error_groups.values(), key=lambda g: -g["count"])
 
-    gaps = store._unanswered(records)[:20]
-    slow = sorted((r for r in uncached if r["latency_ms"] > s.slow_answer_ms), key=lambda r: -r["latency_ms"])
+    all_gaps = store._unanswered(records)
+    open_gaps = [g for g in all_gaps if not g["reviewed"]]
+    gaps = (all_gaps if show_hidden else open_gaps)[:20]
+    slow = sorted((r for r in uncached if r["latency_ms"] > s.slow_answer_ms and to_do(r)),
+                  key=lambda r: -r["latency_ms"])
     summary = {
         "total": total,
         "answered": groups["answered"], "not_answered": groups["not_answered"], "errors": groups["error"],
@@ -233,7 +249,11 @@ def monitoring(hours: int = 24) -> dict:
         "tokens": {"prompt": prompt, "completion": completion, "total": prompt + completion},
         "estimated_cost_usd": _cost(prompt, completion),
     }
-    unverified = [r for r in records if r["outcome"] == "unverified"]
+    unverified = [r for r in records if r["outcome"] == "unverified" and to_do(r)]
+    reviewed_hidden = 0 if show_hidden else sum(
+        1 for r in records if r.get("reviewed") and (
+            r["outcome"] in ("not_found", "unverified") or r.get("rating") == "down"
+            or (not r.get("cached") and (r.get("latency_ms") or 0) > s.slow_answer_ms)))
     today = usage.snapshot()
     check = graph.check_model_status()
     # Answers whose checks ran on the answer model although a separate check model is set.
@@ -250,19 +270,25 @@ def monitoring(hours: int = 24) -> dict:
         "steps": steps,
         "today": today,
         "check_model": check,
-        "recommendations": recommendations(summary, errors, steps, gaps, len(unverified), today,
-                                           check, big_model_checks),
+        # Suggestions count only what's still open, whatever show_hidden is.
+        "recommendations": recommendations(
+            summary, errors, steps, open_gaps,
+            sum(1 for r in records if r["outcome"] == "unverified" and not r.get("reviewed")),
+            today, check, big_model_checks),
         "errors": errors,
         "slow": [_brief(r) for r in slow[:20]],
         "gaps": gaps,
-        "downvoted": [_brief(r) for r in records if r.get("rating") == "down"][:20],
+        "downvoted": [_brief(r) for r in records if r.get("rating") == "down" and to_do(r)][:20],
         "unverified": [_brief(r) for r in unverified][:20],
+        "hidden": {"reviewed": reviewed_hidden, "excluded": len(excluded)},
+        "excluded": [_brief(r) for r in excluded][:50] if show_hidden else [],
     }
 
 
 CSV_FIELDS = ["created_at", "id", "session_id", "outcome", "latency_ms", "question", "answer", "sources",
               "decision", "grounded", "web_searched", "cached", "llm_model", "check_model", "prompt_version",
-              "prompt_tokens", "completion_tokens", "rating", "comment", "pii_masked", "error_type"]
+              "prompt_tokens", "completion_tokens", "rating", "comment", "pii_masked", "error_type",
+              "reviewed", "review_note", "excluded"]
 
 
 def audit_csv(hours: int) -> str:
