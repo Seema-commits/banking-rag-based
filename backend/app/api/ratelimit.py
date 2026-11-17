@@ -32,13 +32,19 @@ def _client_ip(request: Request) -> str:
 
 
 def limit_chat(request: Request) -> None:
+    check_limits(_client_ip(request), get_settings().chat_requests_per_minute_per_ip)
+
+
+def check_limits(client: str, per_minute: int, count_daily: bool = True) -> None:
+    """Per-client per-minute limit, plus the daily question cap shared by every channel (it protects
+    the Groq quota). Raises HTTPException(429) with a user-facing message. Used by the chat
+    endpoints (client = visitor IP) and the MCP tools (client = "mcp")."""
     settings = get_settings()
     now = time.monotonic()
     today = datetime.now(timezone.utc).date().isoformat()
-    ip = _client_ip(request)
+    ip = client
 
     with _lock:
-        per_minute = settings.chat_requests_per_minute_per_ip
         if per_minute > 0:
             hits = _per_ip[ip]
             while hits and now - hits[0] > 60:
@@ -50,7 +56,7 @@ def limit_chat(request: Request) -> None:
                     "You're sending messages too quickly. Please wait a minute and try again.",
                 )
 
-        per_day = settings.chat_requests_per_day
+        per_day = settings.chat_requests_per_day if count_daily else 0
         if _day["date"] != today:
             _day["date"], _day["count"] = today, 0
         if per_day > 0 and _day["count"] >= per_day:
@@ -62,5 +68,7 @@ def limit_chat(request: Request) -> None:
 
         if per_minute > 0:
             _per_ip[ip].append(now)
-        _day["count"] += 1
-    usage.add("questions")  # warns the owner at 80% / 100% of the daily cap
+        if count_daily:
+            _day["count"] += 1
+    if count_daily:
+        usage.add("questions")  # warns the owner at 80% / 100% of the daily cap

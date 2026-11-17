@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from app import mcp_server
 from app.api import admin, chat
 from app.config import get_settings
 from app.observability import configure_logging, log_event
@@ -107,8 +108,11 @@ async def lifespan(app: FastAPI):
               top_k=settings.top_k, relevance_threshold=settings.relevance_threshold,
               documents=len(registry.list_documents()), storage=settings.storage_backend,
               documents_bucket=bool(settings.documents_bucket))
+    if settings.mcp_token:
+        logger.info("MCP server enabled at %s", mcp_server.PATH)
     logger.info("Ready")
-    yield
+    async with mcp_server.session_manager():  # the /mcp endpoint needs this running
+        yield
 
 
 app = FastAPI(title="RAG Chatbot API", lifespan=lifespan)
@@ -131,7 +135,8 @@ async def cache_headers(request, call_next):
     """
     response = await call_next(request)
     path = request.url.path
-    if request.method == "GET" and not path.startswith("/api") and "cache-control" not in response.headers:
+    if (request.method == "GET" and not path.startswith(("/api", mcp_server.PATH))
+            and "cache-control" not in response.headers):
         response.headers["Cache-Control"] = (
             "public, max-age=31536000, immutable" if path.startswith("/assets/") else "no-cache")
     return response
@@ -139,6 +144,8 @@ async def cache_headers(request, call_next):
 
 app.include_router(chat.router)
 app.include_router(admin.router)
+# MCP server for AI agents (docs/mcp.md); answers 404 unless MCP_TOKEN is set.
+app.router.routes.extend(mcp_server.build_routes())
 
 
 @app.get("/api/health")

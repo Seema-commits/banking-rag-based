@@ -570,6 +570,7 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
             <Tile label={s.estimated_cost_usd != null ? `tokens (≈ $${s.estimated_cost_usd})` : "Groq tokens"}
               value={num(s.tokens.total)} hint="Set LLM_COST_PER_MILLION_*_TOKENS to estimate cost" />
             <Tile label="web searches" value={num(s.web_searches)} />
+            {s.via_mcp > 0 && <Tile label="via MCP" value={num(s.via_mcp)} hint="Asked by AI agents through /mcp" />}
           </div>
 
           <div className="card">

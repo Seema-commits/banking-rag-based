@@ -245,6 +245,7 @@ def monitoring(hours: int = 24, show_hidden: bool = False) -> dict:
         "max_ms": max(latencies) if latencies else None,
         "cache_hit_rate": round(sum(bool(r.get("cached")) for r in records) / total, 3) if total else None,
         "web_searches": sum(bool(r.get("web_searched")) for r in records),
+        "via_mcp": sum(r.get("channel") == "mcp" for r in records),
         "feedback": feedback,
         "tokens": {"prompt": prompt, "completion": completion, "total": prompt + completion},
         "estimated_cost_usd": _cost(prompt, completion),

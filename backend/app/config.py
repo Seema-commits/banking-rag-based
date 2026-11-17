@@ -137,6 +137,11 @@ class Settings(BaseSettings):
     llm_cost_per_million_input_tokens: float = 0.0
     llm_cost_per_million_output_tokens: float = 0.0
 
+    # MCP server at /mcp, so AI agents (Claude Desktop, Claude Code, ...) can use the knowledge base
+    # (docs/mcp.md). Off unless a token is set; clients send it as "Authorization: Bearer <token>".
+    mcp_token: str = ""
+    mcp_requests_per_minute: int = 10  # all MCP clients together; the daily cap is shared with the chat
+
     # Security / API
     admin_api_key: str = ""
     # Extra allowed frontend origins, e.g. a deployed site. Any localhost port is always allowed.
