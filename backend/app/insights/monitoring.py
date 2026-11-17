@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from app import usage
 from app.config import get_settings
 from app.insights import store
+from app.rag import graph
 
 WINDOW_LIMIT = 2000  # most recent records considered per view
 
@@ -110,10 +111,29 @@ def _cost(prompt_tokens: int, completion_tokens: int) -> float | None:
 
 
 def recommendations(summary: dict, errors: list[dict], steps: list[dict], gaps: list[dict],
-                    unverified: int, today: dict) -> list[dict]:
+                    unverified: int, today: dict, check: dict | None = None,
+                    big_model_checks: int = 0) -> list[dict]:
     """Plain-English suggestions, most urgent first. severity: critical | warning | info."""
     s = get_settings()
     recs = []
+    if check and check.get("falling_back"):
+        minutes = max(1, round(s.check_model_retry_seconds / 60))
+        recs.append({
+            "severity": "warning",
+            "title": f"Checks are running on the big model ({check['active']})",
+            "detail": f"The fast check model {check['configured']} failed: {check['error'] or 'unknown error'}. "
+                      "Grading and fact-checks are slower and use more tokens until it works again. It is "
+                      f"retried every {minutes} min. If it keeps failing, pick a current small model at "
+                      "console.groq.com/docs/models and set CHECK_MODEL on the service "
+                      "(docs/deploy-cloud-run.md).",
+        })
+    elif big_model_checks:
+        recs.append({
+            "severity": "info",
+            "title": f"{big_model_checks} answers in this period ran their checks on the big model",
+            "detail": f"The fast check model ({s.check_model}) wasn't available when they were asked, so "
+                      "they were slower. It is working now.",
+        })
     by_type = {e["outcome"]: e["count"] for e in errors}
     if by_type.get("llm_auth_error"):
         recs.append({"severity": "critical", "title": "The Groq API key is being rejected",
@@ -215,6 +235,12 @@ def monitoring(hours: int = 24) -> dict:
     }
     unverified = [r for r in records if r["outcome"] == "unverified"]
     today = usage.snapshot()
+    check = graph.check_model_status()
+    # Answers whose checks ran on the answer model although a separate check model is set.
+    big_model_checks = sum(
+        1 for r in uncached
+        if s.check_model and s.check_model != s.groq_model and r.get("check_model")
+        and r["check_model"] == r.get("llm_model"))
     return {
         "range_hours": hours, "from": start.isoformat(), "to": end.isoformat(),
         "truncated": total >= WINDOW_LIMIT, "storage": s.storage_backend,
@@ -223,7 +249,9 @@ def monitoring(hours: int = 24) -> dict:
         "timeline": _buckets(records, start, end, hours),
         "steps": steps,
         "today": today,
-        "recommendations": recommendations(summary, errors, steps, gaps, len(unverified), today),
+        "check_model": check,
+        "recommendations": recommendations(summary, errors, steps, gaps, len(unverified), today,
+                                           check, big_model_checks),
         "errors": errors,
         "slow": [_brief(r) for r in slow[:20]],
         "gaps": gaps,

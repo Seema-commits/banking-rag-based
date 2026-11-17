@@ -161,6 +161,28 @@ read -rs -p "Paste the new Groq API key: " KEY && printf '%s' "$KEY" | gcloud se
 gcloud run deploy thistlewood-assistant --source . --region us-central1
 ```
 
+## Changing the check model
+
+The agent's grading and fact-checks run on a small fast model (`CHECK_MODEL`, default
+`openai/gpt-oss-20b`). Groq sometimes retires models. When the check model stops working, checks
+fall back to the slower answer model and **Admin → Monitoring** shows *"Checks are running on the
+big model"* with Groq's error. That's how `llama-3.1-8b-instant` (`model_not_found`) was found.
+
+1. List the models your key can use:
+
+   ```bash
+   curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $(gcloud secrets versions access latest --secret=groq-api-key)" | python3 -c "import sys,json; [print(m['id']) for m in sorted(json.load(sys.stdin)['data'], key=lambda m: m['id'])]"
+   ```
+
+2. Pick a small general model (8B–30B, not a guard, speech or Arabic-only model) and switch to it.
+   This takes about a minute and needs no rebuild:
+
+   ```bash
+   gcloud run services update thistlewood-assistant --region us-central1 --update-env-vars CHECK_MODEL=openai/gpt-oss-20b
+   ```
+
+3. Ask a new question and check that the newest record in Firestore shows the new `check_model`.
+
 ## Optional: turn on the web search tool
 
 The agent can search official websites (rbi.org.in, uidai.gov.in, incometax.gov.in,
