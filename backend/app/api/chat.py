@@ -94,6 +94,7 @@ def _audit_details(metrics: dict, history: list, pii_found: list[str]) -> dict:
         "retrieval_mode": settings.retrieval_mode,
         "relevance_threshold": settings.relevance_threshold,
         "history_messages": len(history),
+        "channel": metrics.get("channel", "web"),
         "pii_masked": sorted(set(pii_found)),
         "tokens": {k: metrics.get(k, 0) for k in ("prompt_tokens", "completion_tokens")},
         "timings_ms": {k[:-3]: v for k, v in metrics.items() if k.endswith("_ms") and k != "llm_ms"},
@@ -120,13 +121,14 @@ def _store_failure(settings, session_id, question, outcome, metrics, history, st
 
 
 def run_chat(req: ChatRequest, on_step: Callable[[str], None] | None = None,
-             on_token: Callable[[str], None] | None = None) -> ChatResponse:
+             on_token: Callable[[str], None] | None = None, channel: str = "web") -> ChatResponse:
     """Answer one question. Raises HTTPException with a user-facing message on failure.
 
     on_step(step) is called as each agent step starts; on_token(text) receives the answer text
     while it is being written (before the grounding check; the returned answer is final)."""
     settings = get_settings()
     metrics = obs.start_request()
+    obs.record(channel=channel)  # "web" (the chat page) or "mcp" (an AI agent through /mcp)
     started = time.perf_counter()
     outcome = "error"
 

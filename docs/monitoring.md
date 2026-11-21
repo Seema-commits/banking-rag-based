@@ -31,7 +31,22 @@ including after restarts.
 - **Clear answer cache:** after fixing a document or prompt, so old answers aren't reused.
 - **Export eval candidates:** unanswered and 👎 questions as JSON lines, to label and add to
   `eval/questions.jsonl`.
-- **Download audit log (CSV):** every record in the selected period (questions are PII-masked).
+- **Download audit log (CSV):** every record in the selected period (questions are PII-masked),
+  including reviewed and excluded ones, with `reviewed`, `review_note` and `excluded` columns.
+
+## Reviewing problems and excluding test questions
+
+Nothing is ever deleted from the audit log. These only change what the dashboard shows:
+
+| Action | Where | Effect |
+|---|---|---|
+| **✓ Reviewed** | A row in Slow answers, Knowledge gaps, Answers marked 👎, Failed fact-check; or a record's details, with an optional note | Leaves its list and the suggestions; **still counted** in every number and chart. A knowledge gap marks every question in that group |
+| **Exclude from stats** | A record's details | Left out of **every** number, chart and the eval candidates, for your own test questions |
+| **Exclude this whole conversation** | A record's details | The same for every question in that chat |
+| **Show hidden** | Toolbar | Shows reviewed rows again (greyed, with **Undo**) and lists the excluded questions with **Include again** |
+
+API: `POST /api/admin/interactions/mark` with `{"ids": [...]}` or `{"session_id": "..."}` and
+`"reviewed"` and/or `"excluded"` (true to set, false to undo), plus an optional `"note"`.
 
 ## Settings
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import PlainTextResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import require_admin
 from app.config import get_settings
@@ -128,9 +128,33 @@ def export_eval_candidates() -> PlainTextResponse:
 
 
 @router.get("/monitoring")
-def get_monitoring(hours: int = Query(24, ge=1, le=24 * 90)) -> dict:
+def get_monitoring(hours: int = Query(24, ge=1, le=24 * 90), show_hidden: bool = False) -> dict:
     """Owner dashboard: health, trends, time per step, problems and suggested fixes."""
-    return monitor.monitoring(hours)
+    return monitor.monitoring(hours, show_hidden)
+
+
+class MarkRequest(BaseModel):
+    """Which records (ids and/or a whole conversation) and what to set. Omitted flags are unchanged."""
+
+    ids: list[str] = Field(default_factory=list, max_length=store.MAX_MARK)
+    session_id: str | None = Field(default=None, max_length=100)
+    reviewed: bool | None = None
+    excluded: bool | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/interactions/mark")
+def mark_interactions(req: MarkRequest) -> dict:
+    """Mark records reviewed / excluded from stats (or undo). Nothing is deleted."""
+    if not req.ids and not req.session_id:
+        raise HTTPException(422, "Give ids or a session_id")
+    if req.reviewed is None and req.excluded is None:
+        raise HTTPException(422, "Set reviewed and/or excluded")
+    updated = store.mark(req.ids, session_id=req.session_id, reviewed=req.reviewed,
+                         excluded=req.excluded, note=req.note)
+    log_event(logger, "interactions_marked", updated=updated, reviewed=req.reviewed, excluded=req.excluded,
+              by_session=bool(req.session_id))
+    return {"updated": updated}
 
 
 @router.get("/interactions/{message_id}")

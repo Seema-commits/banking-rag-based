@@ -30,3 +30,6 @@ groq>=0.30
 # Permanent storage on Google Cloud (only used when STORAGE_BACKEND=firestore / DOCUMENTS_BUCKET is set)
 google-cloud-firestore>=2.16
 google-cloud-storage>=2.16
+
+# MCP server at /mcp for AI agents (docs/mcp.md). v2 API (MCPServer); v1 used FastMCP.
+mcp>=2.3,<3

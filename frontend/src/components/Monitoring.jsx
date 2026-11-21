@@ -287,7 +287,21 @@ function UsageMeter({ name, used, limit }) {
   );
 }
 
-function ProblemTable({ title, rows, columns, onOpen, emptyText, action }) {
+function ReviewButton({ row, onReview }) {
+  const ids = row.ids || (row.id ? [row.id] : []);
+  return (
+    <button className={row.reviewed ? "link small" : "small"} title={row.reviewed
+      ? "Put this back on the list" : "Done with this: hide it from the list (it still counts in the stats)"}
+      onClick={(e) => { e.stopPropagation(); onReview(ids, !row.reviewed); }}>
+      {row.reviewed ? "Undo" : "✓ Reviewed"}
+    </button>
+  );
+}
+
+function ProblemTable({ title, rows, columns, onOpen, emptyText, action, onReview }) {
+  const cols = onReview
+    ? [...columns, { label: "", nowrap: true, render: (r) => <ReviewButton row={r} onReview={onReview} /> }]
+    : columns;
   return (
     <div className="card">
       <div className="card-head">
@@ -300,14 +314,15 @@ function ProblemTable({ title, rows, columns, onOpen, emptyText, action }) {
         <div className="table-wrap">
           <table className="problems">
             <thead>
-              <tr>{columns.map((c) => <th key={c.label}>{c.label}</th>)}</tr>
+              <tr>{cols.map((c, i) => <th key={c.label || i}>{c.label}</th>)}</tr>
             </thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={r.id || r.question || i} className={onOpen && r.id ? "clickable" : ""}
+                <tr key={r.id || r.question || i}
+                  className={[onOpen && r.id && "clickable", r.reviewed && "reviewed"].filter(Boolean).join(" ")}
                   onClick={() => onOpen && r.id && onOpen(r.id)}>
-                  {columns.map((c) => (
-                    <td key={c.label} className={[c.wrap && "wrap", c.nowrap && "nowrap", c.fix && "fix"].filter(Boolean).join(" ")}>
+                  {cols.map((c, j) => (
+                    <td key={c.label || j} className={[c.wrap && "wrap", c.nowrap && "nowrap", c.fix && "fix"].filter(Boolean).join(" ")}>
                       {c.render(r)}
                     </td>
                   ))}
@@ -321,12 +336,29 @@ function ProblemTable({ title, rows, columns, onOpen, emptyText, action }) {
   );
 }
 
-function Detail({ adminKey, id, onClose }) {
+function Detail({ adminKey, id, onClose, onChanged }) {
   const [rec, setRec] = useState(null);
   const [error, setError] = useState(null);
-  useEffect(() => {
-    api.interaction(adminKey, id).then(setRec).catch((e) => setError(e.message));
-  }, [adminKey, id]);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const reload = useCallback(
+    () => api.interaction(adminKey, id).then((r) => { setRec(r); setNote(r.review_note || ""); })
+      .catch((e) => setError(e.message)),
+    [adminKey, id]);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function mark(body) {
+    setBusy(true);
+    try {
+      await api.mark(adminKey, body);
+      await reload();
+      onChanged();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const timings = Object.entries(rec?.timings_ms || {}).filter(([k, v]) => v > 0 && k !== "llm");
   const max = Math.max(1, ...timings.map(([, v]) => v));
   return (
@@ -342,7 +374,34 @@ function Detail({ adminKey, id, onClose }) {
             <p className="muted small">
               {when(rec.created_at)} · {OUTCOME_LABELS[rec.outcome] || rec.outcome} · {secs(rec.latency_ms)}
               {rec.cached && " · cached"}
+              {rec.reviewed && " · ✓ reviewed"}
+              {rec.excluded && " · excluded from stats"}
             </p>
+            <div className="review-box">
+              <label htmlFor="review-note" className="small">Review note (optional)</label>
+              <input id="review-note" value={note} maxLength={500} disabled={busy}
+                placeholder="e.g. added a minors section to the guide" onChange={(e) => setNote(e.target.value)} />
+              <div className="review-actions">
+                <button disabled={busy} onClick={() => mark({ ids: [rec.id], reviewed: !rec.reviewed, note })}>
+                  {rec.reviewed ? "Mark not reviewed" : "✓ Mark reviewed"}
+                </button>
+                <button className="secondary" disabled={busy}
+                  title="For your own test questions: left out of every number and chart, still kept in the audit log"
+                  onClick={() => mark({ ids: [rec.id], excluded: !rec.excluded })}>
+                  {rec.excluded ? "Include in stats again" : "Exclude from stats"}
+                </button>
+                {rec.session_id && (
+                  <button className="link" disabled={busy}
+                    title="Every question in this chat, e.g. a whole test conversation"
+                    onClick={() => mark({ session_id: rec.session_id, excluded: !rec.excluded })}>
+                    {rec.excluded ? "Include this whole conversation" : "Exclude this whole conversation"}
+                  </button>
+                )}
+              </div>
+              {rec.reviewed && rec.reviewed_at && (
+                <p className="muted small">Reviewed {when(rec.reviewed_at)}{rec.review_note ? `: “${rec.review_note}”` : ""}</p>
+              )}
+            </div>
             <h3>Question</h3>
             <p className="quote">{rec.question}</p>
             <h3>Answer shown</h3>
@@ -404,19 +463,25 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
   const [error, setError] = useState(null);
   const [status, setStatus] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [showHidden, setShowHidden] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setData(await api.monitoring(adminKey, hours));
+      setData(await api.monitoring(adminKey, hours, showHidden));
       setError(null);
     } catch (e) {
       setError(e.message);
     }
-  }, [adminKey, hours]);
+  }, [adminKey, hours, showHidden]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const review = (ids, reviewed) => act(async () => {
+    await api.mark(adminKey, { ids, reviewed });
+    await load();
+  }, reviewed ? "Marked reviewed. It still counts in the stats." : "Put back on the list.");
 
   const s = data?.summary;
   const timelineTable = useMemo(() => data && (
@@ -459,6 +524,10 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
           ))}
         </div>
         <div className="toolbar-actions">
+          <label className="toggle small">
+            <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+            Show hidden
+          </label>
           <button className="link" onClick={load}>Refresh</button>
           <button className="link" onClick={() => act(async () => {
             const res = await api.clearCache(adminKey);
@@ -482,6 +551,14 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
               : "History: temporary (local file). On Cloud Run it resets when the app restarts; see docs/storage.md."}
           </p>
 
+          {(data.hidden.reviewed > 0 || data.hidden.excluded > 0) && !showHidden && (
+            <p className="muted small">
+              {data.hidden.reviewed > 0 && `${data.hidden.reviewed} reviewed ${data.hidden.reviewed === 1 ? "item is" : "items are"} hidden from the lists below. `}
+              {data.hidden.excluded > 0 && `${data.hidden.excluded} test ${data.hidden.excluded === 1 ? "question is" : "questions are"} excluded from every number. `}
+              <button className="link small" onClick={() => setShowHidden(true)}>Show hidden</button>
+            </p>
+          )}
+
           <div className="stats">
             <Tile label="questions" value={num(s.total)} />
             <Tile label="answered" value={pct(s.answer_rate)} hint="Answered from documents, the web, or small talk" />
@@ -493,6 +570,7 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
             <Tile label={s.estimated_cost_usd != null ? `tokens (≈ $${s.estimated_cost_usd})` : "Groq tokens"}
               value={num(s.tokens.total)} hint="Set LLM_COST_PER_MILLION_*_TOKENS to estimate cost" />
             <Tile label="web searches" value={num(s.web_searches)} />
+            {s.via_mcp > 0 && <Tile label="via MCP" value={num(s.via_mcp)} hint="Asked by AI agents through /mcp" />}
           </div>
 
           <div className="card">
@@ -554,22 +632,38 @@ export default function Monitoring({ adminKey, onUploadRequested }) {
                 </button>
               )) },
             ]} />
-          <ProblemTable title={`Slow answers (over ${secs(data.slow_answer_ms)})`} rows={data.slow} onOpen={open}
+          <ProblemTable title={`Slow answers (over ${secs(data.slow_answer_ms)})`} rows={data.slow} onOpen={open} onReview={review}
             emptyText="No slow answers in this period."
             columns={[qCol, { label: "Time", render: (r) => secs(r.latency_ms) },
               { label: "Slowest step", render: (r) => r.slowest_step ? `${r.slowest_step} (${secs(r.slowest_step_ms)})` : "–" }, whenCol]} />
-          <ProblemTable title="Knowledge gaps: questions the documents couldn't answer" rows={data.gaps}
+          <ProblemTable title="Knowledge gaps: questions the documents couldn't answer" rows={data.gaps} onReview={review}
             emptyText="None in this period."
             action={data.gaps.length > 0 && <button onClick={onUploadRequested}>Upload a document</button>}
             columns={[qCol, { label: "Times asked", render: (g) => g.count }, whenCol]} />
-          <ProblemTable title="Answers marked 👎" rows={data.downvoted} onOpen={open} emptyText="None in this period."
+          <ProblemTable title="Answers marked 👎" rows={data.downvoted} onOpen={open} onReview={review} emptyText="None in this period."
             columns={[qCol, { label: "Comment", wrap: true, render: (r) => r.comment || "–" }, whenCol]} />
-          <ProblemTable title="Answers that failed the fact-check" rows={data.unverified} onOpen={open}
+          <ProblemTable title="Answers that failed the fact-check" rows={data.unverified} onOpen={open} onReview={review}
             emptyText="None in this period." columns={[qCol, whenCol]} />
-          <p className="muted small">Click a row (or an error's example) to see the full record: answer, sources, the agent's steps and timings.</p>
+          {showHidden && (
+            <ProblemTable title="Excluded from stats (test questions)" rows={data.excluded} onOpen={open}
+              emptyText="Nothing excluded in this period."
+              columns={[qCol, { label: "Outcome", render: (r) => OUTCOME_LABELS[r.outcome] || r.outcome }, whenCol,
+                { label: "", nowrap: true, render: (r) => (
+                  <button className="link small" onClick={(e) => {
+                    e.stopPropagation();
+                    act(async () => { await api.mark(adminKey, { ids: [r.id], excluded: false }); await load(); },
+                      "Included in the stats again.");
+                  }}>Include again</button>
+                ) }]} />
+          )}
+          <p className="muted small">
+            Click a row (or an error's example) to see the full record: answer, sources, the agent's steps and timings.
+            ✓ Reviewed takes an item off its list once you've dealt with it; it still counts in the stats. In a
+            record you can also exclude your own test questions from the stats. Nothing is deleted; turn on Show hidden to undo.
+          </p>
         </>
       )}
-      {openId && <Detail adminKey={adminKey} id={openId} onClose={() => setOpenId(null)} />}
+      {openId && <Detail adminKey={adminKey} id={openId} onClose={() => setOpenId(null)} onChanged={load} />}
     </div>
   );
 }

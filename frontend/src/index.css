@@ -255,6 +255,18 @@ table.problems .link { padding: 0 6px 0 0; font-size: 13px; }
 .quote.pre { white-space: pre-wrap; }
 ul.plain { margin: 0; padding-left: 18px; font-size: 14px; }
 
+/* Review / exclude: nothing is deleted, these only change what the dashboard shows. */
+button.small { padding: 4px 10px; font-size: 13px; }
+button.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); }
+.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
+.toggle input { margin: 0; }
+tr.reviewed td { color: var(--muted); }
+.review-box { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 10px; }
+.review-box input { width: 100%; box-sizing: border-box; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.review-box p { margin: 0; }
+
 @media (max-width: 600px) {
   .chart-grid { grid-template-columns: 1fr; }
   .rec { grid-template-columns: 1fr; }

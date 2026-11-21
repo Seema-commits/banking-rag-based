@@ -168,6 +168,20 @@ agent step, problem lists, and a detail view with the full audit trail of any qu
 clear the answer cache, export eval candidates and download the audit log as CSV. See
 [docs/monitoring.md](docs/monitoring.md).
 
+## MCP server (for AI agents)
+
+The knowledge base is also an **MCP server** at `/mcp` on the same service. MCP (Model Context
+Protocol) is the open standard for connecting AI apps to tools. Claude Desktop, Claude Code or
+another agent can connect to it and get the same checked, cited answers as the chat, through
+three read-only tools:
+- `ask_thistlewood`: the full agent
+- `search_bank_documents`: passages only, no LLM call
+- `list_documents`
+
+It's off until `MCP_TOKEN` is set, and every request needs that bearer token. It shares the chat's
+PII masking, audit log (`channel: "mcp"`) and daily cap. Setup and four ways to test it, from a
+Cloud Shell script to Claude Desktop, are in [docs/mcp.md](docs/mcp.md).
+
 ## Feedback and Insights
 
 Every answer has 👍/👎 buttons (👎 asks for an optional comment, which is PII-masked). Each
